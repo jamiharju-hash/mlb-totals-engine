@@ -10,7 +10,7 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts';
-import { supabase } from '../lib/supabase';
+import { getSupabaseClient } from '../lib/supabase';
 
 type Summary = {
   todays_games: number;
@@ -76,31 +76,37 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       setLoading(true);
-      const [summaryResult, signalsResult, metricsResult] = await Promise.all([
-        supabase.from('dashboard_summary').select('*').single(),
-        supabase
-          .from('predictions_log')
-          .select('id,game_id,prediction_timestamp,side,should_bet,market_total,calibrated_model_total,edge_runs,expected_value,stake,confidence,truth_status,clv,roi')
-          .eq('should_bet', true)
-          .order('prediction_timestamp', { ascending: false })
-          .limit(20),
-        supabase
-          .from('daily_metrics')
-          .select('metric_date,avg_clv,roi,bets,p95_latency_ms,max_data_lag_seconds,success_criteria_pass')
-          .order('metric_date', { ascending: true })
-          .limit(30),
-      ]);
+      try {
+        const supabase = getSupabaseClient();
+        const [summaryResult, signalsResult, metricsResult] = await Promise.all([
+          supabase.from('dashboard_summary').select('*').single(),
+          supabase
+            .from('predictions_log')
+            .select('id,game_id,prediction_timestamp,side,should_bet,market_total,calibrated_model_total,edge_runs,expected_value,stake,confidence,truth_status,clv,roi')
+            .eq('should_bet', true)
+            .order('prediction_timestamp', { ascending: false })
+            .limit(20),
+          supabase
+            .from('daily_metrics')
+            .select('metric_date,avg_clv,roi,bets,p95_latency_ms,max_data_lag_seconds,success_criteria_pass')
+            .order('metric_date', { ascending: true })
+            .limit(30),
+        ]);
 
-      const firstError = summaryResult.error || signalsResult.error || metricsResult.error;
-      if (firstError) {
-        setError(firstError.message);
-      } else {
-        setSummary(summaryResult.data as Summary);
-        setSignals((signalsResult.data ?? []) as Prediction[]);
-        setMetrics((metricsResult.data ?? []) as DailyMetric[]);
-        setError(null);
+        const firstError = summaryResult.error || signalsResult.error || metricsResult.error;
+        if (firstError) {
+          setError(firstError.message);
+        } else {
+          setSummary(summaryResult.data as Summary);
+          setSignals((signalsResult.data ?? []) as Prediction[]);
+          setMetrics((metricsResult.data ?? []) as DailyMetric[]);
+          setError(null);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Dashboard load failed');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     loadDashboard();
