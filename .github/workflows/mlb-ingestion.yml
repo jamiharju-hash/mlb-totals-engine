@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_URL: https://ohykyscckijbphenugkb.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -25,12 +25,12 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validate required secrets
         run: |
-          test -n "$SUPABASE_URL" || (echo "Missing secret: SUPABASE_URL" && exit 1)
+          echo "SUPABASE_URL configured for project ohykyscckijbphenugkb"
           test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing secret: SUPABASE_SERVICE_ROLE_KEY" && exit 1)
           python - <<'PY'
           from app.config import get_settings
           settings = get_settings()
-          assert settings.supabase_url, 'Settings did not receive SUPABASE_URL'
+          assert settings.supabase_url == 'https://ohykyscckijbphenugkb.supabase.co', 'Unexpected SUPABASE_URL'
           assert settings.supabase_service_role_key, 'Settings did not receive SUPABASE_SERVICE_ROLE_KEY'
           print('Supabase env validated in Python settings')
           PY
