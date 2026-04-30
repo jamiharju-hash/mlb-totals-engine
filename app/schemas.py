@@ -33,10 +33,20 @@ class PredictionRequest(BaseModel):
     features: GameFeatures
 
 
+class CalibrationDetails(BaseModel):
+    raw_total: float
+    calibrated_total: float
+    residual_vs_market: float
+    market_percentile: float
+    model_percentile: float
+    calibration_method: str
+
+
 class BetSignal(BaseModel):
     game_id: str
     side: BetSide
     model_total: float
+    raw_model_total: float
     market_total: float
     edge_runs: float
     estimated_probability: float
@@ -45,3 +55,4 @@ class BetSignal(BaseModel):
     stake: float
     confidence: str
     reason: str
+    calibration: CalibrationDetails
