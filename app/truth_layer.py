@@ -10,6 +10,27 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def snapshot_over_price(snapshot: dict[str, Any]) -> int:
+    value = snapshot.get('over') if snapshot.get('over') is not None else snapshot.get('over_odds')
+    if value is None:
+        raise ValueError('Snapshot is missing over/over_odds price')
+    return int(value)
+
+
+def snapshot_under_price(snapshot: dict[str, Any]) -> int:
+    value = snapshot.get('under') if snapshot.get('under') is not None else snapshot.get('under_odds')
+    if value is None:
+        raise ValueError('Snapshot is missing under/under_odds price')
+    return int(value)
+
+
+def result_finalized_at(result: dict[str, Any]) -> str:
+    value = result.get('finalized_at') or result.get('created_at')
+    if value is None:
+        raise ValueError('Game result is missing finalized_at/created_at timestamp')
+    return str(value)
+
+
 def calculate_clv_for_side(side: str, market_total: float, closing_total: float) -> float:
     side = side.upper()
     if side == 'OVER':
@@ -38,17 +59,42 @@ def get_latest_market_snapshot_before_prediction(game_id: str, prediction_timest
     return rows[0] if rows else None
 
 
-def get_closing_snapshot(game_id: str) -> dict[str, Any] | None:
-    """Return the latest available market snapshot for a completed game.
+def get_game_start_timestamp(game_id: str) -> str | None:
+    """Return first-pitch/game start timestamp when available.
 
-    In production, this should be restricted to snapshots before first pitch.
-    If first-pitch timestamps are available, add timestamp <= game_datetime.
+    Live schema uses games.id as the canonical game key. The reconciliation
+    migration also adds game_datetime for production closing-line reconstruction.
     """
+    supabase = get_supabase_admin()
+    result = (
+        supabase.table('games')
+        .select('id,game_datetime')
+        .eq('id', game_id)
+        .limit(1)
+        .execute()
+    )
+    rows = result.data or []
+    if not rows:
+        return None
+    return rows[0].get('game_datetime')
+
+
+def get_closing_snapshot(game_id: str) -> dict[str, Any] | None:
+    """Return the last available market snapshot before game start.
+
+    This is the canonical closing-line rule. If game start is missing, no CLV
+    should be calculated.
+    """
+    game_start = get_game_start_timestamp(game_id)
+    if not game_start:
+        return None
+
     supabase = get_supabase_admin()
     result = (
         supabase.table('odds_snapshots')
         .select('*')
         .eq('game_id', game_id)
+        .lte('timestamp', game_start)
         .order('timestamp', desc=True)
         .limit(1)
         .execute()
@@ -74,7 +120,7 @@ def create_pending_truth_link(signal_decision_id: int, signal_row: dict[str, Any
     """Create the initial truth link at prediction time.
 
     Required signal_row fields:
-        game_id, created_at, market_total, side
+        game_id, created_at or prediction_timestamp, market_total, side
     """
     prediction_timestamp = signal_row.get('prediction_timestamp') or signal_row.get('created_at') or utc_now_iso()
     game_id = signal_row['game_id']
@@ -89,8 +135,8 @@ def create_pending_truth_link(signal_decision_id: int, signal_row: dict[str, Any
         'market_snapshot_id': market_snapshot['id'],
         'market_snapshot_timestamp': market_snapshot['timestamp'],
         'market_total': market_snapshot['line'],
-        'market_over': market_snapshot['over'],
-        'market_under': market_snapshot['under'],
+        'market_over': snapshot_over_price(market_snapshot),
+        'market_under': snapshot_under_price(market_snapshot),
         'truth_status': 'PENDING',
     }
     supabase = get_supabase_admin()
@@ -121,14 +167,19 @@ def finalize_truth_link(signal_decision_id: int, side: str) -> dict[str, Any]:
         return link
 
     clv = calculate_clv_for_side(side, float(link['market_total']), float(closing_snapshot['line']))
+    finalized_at = result_finalized_at(result)
+    total_runs = result.get('total_runs')
+    if total_runs is None:
+        raise ValueError(f'Game result is missing total_runs for game_id={game_id}')
+
     update = {
         'closing_snapshot_id': closing_snapshot['id'],
         'closing_snapshot_timestamp': closing_snapshot['timestamp'],
         'closing_total': closing_snapshot['line'],
-        'closing_over': closing_snapshot['over'],
-        'closing_under': closing_snapshot['under'],
-        'result_finalized_at': result['finalized_at'],
-        'total_runs': result['total_runs'],
+        'closing_over': snapshot_over_price(closing_snapshot),
+        'closing_under': snapshot_under_price(closing_snapshot),
+        'result_finalized_at': finalized_at,
+        'total_runs': total_runs,
         'clv': clv,
         'truth_status': 'READY',
         'updated_at': utc_now_iso(),
@@ -143,7 +194,7 @@ def finalize_truth_link(signal_decision_id: int, side: str) -> dict[str, Any]:
         {
             'closing_snapshot_id': closing_snapshot['id'],
             'closing_snapshot_timestamp': closing_snapshot['timestamp'],
-            'result_finalized_at': result['finalized_at'],
+            'result_finalized_at': finalized_at,
             'truth_status': 'READY',
         }
     ).eq('id', signal_decision_id).execute()
