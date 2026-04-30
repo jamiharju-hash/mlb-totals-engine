@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.ev import build_signal
 from app.model import TotalsModel
 from app.schemas import BetSignal, CalibrationDetails, PredictionRequest
+from app.signals import log_signal_decision
 
 settings = get_settings()
 model = TotalsModel(settings.model_path)
@@ -55,7 +56,7 @@ def predict(request: PredictionRequest) -> BetSignal:
         kelly_fraction=settings.kelly_fraction,
         max_stake_pct=settings.max_stake_pct,
     )
-    return BetSignal(
+    response = BetSignal(
         game_id=features.game_id,
         side=signal.side,
         model_total=round(calibrated_total, 3),
@@ -77,3 +78,7 @@ def predict(request: PredictionRequest) -> BetSignal:
             calibration_method=calibration.calibration_method,
         ),
     )
+    if request.log_decision:
+        log_signal_decision(response)
+        response.decision_logged = True
+    return response
