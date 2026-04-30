@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.calibration import load_calibrator
 from app.config import get_settings
+from app.db.supabase_admin import get_supabase_admin
 from app.ev import build_signal
 from app.model import TotalsModel
 from app.schemas import BetSignal, CalibrationDetails, PredictionRequest
@@ -35,6 +36,27 @@ def health() -> dict:
         'status': 'ok',
         'model_loaded': model.is_loaded,
         'calibrator_loaded': True,
+    }
+
+
+@app.get('/metrics')
+def metrics() -> dict:
+    """Return canonical dashboard metrics from READY predictions only."""
+    supabase = get_supabase_admin()
+    summary = supabase.table('metrics_summary').select('*').single().execute()
+    buckets = supabase.table('edge_bucket_analysis').select('*').execute()
+    data = summary.data or {}
+    return {
+        'roi': data.get('roi', 0),
+        'clv': data.get('avg_clv', 0),
+        'clv_win_rate': data.get('clv_win_rate', 0),
+        'bet_count': data.get('bet_count', 0),
+        'win_rate': data.get('win_rate', 0),
+        'total_staked': data.get('total_staked', 0),
+        'pnl': data.get('pnl', 0),
+        'avg_latency_ms': data.get('avg_latency_ms', 0),
+        'data_lag_seconds': data.get('data_lag_seconds', 0),
+        'edge_buckets': buckets.data or [],
     }
 
 
