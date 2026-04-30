@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
 from app.clients.mlb_stats import MLBStatsClient
 from app.clients.odds_api import OddsAPIClient
 from app.config import get_settings
-from app.db.supabase_admin import get_supabase_admin
+from app.db.supabase_admin import get_supabase_ingestion_client
 
 
 @dataclass(frozen=True)
@@ -154,71 +154,42 @@ def normalize_totals_odds(
 
 
 def upsert_games(games: Iterable[NormalizedGame]) -> int:
-    supabase = get_supabase_admin()
-    rows = [
-        {
-            'id': game.game_id,
-            'game_date': game.game_date,
-            'game_datetime': game.game_datetime,
-            'home_team': game.home_team,
-            'away_team': game.away_team,
-            'home_probable_pitcher': game.home_probable_pitcher,
-            'away_probable_pitcher': game.away_probable_pitcher,
-            'status': game.status,
-            'updated_at': _utc_now(),
-        }
-        for game in games
-        if game.game_id and game.game_id != 'None'
-    ]
-    if rows:
-        supabase.table('games').upsert(rows, on_conflict='id').execute()
-    return len(rows)
+    games_list = [game for game in games if game.game_id and game.game_id != 'None']
+    if not games_list:
+        return 0
+    client = get_supabase_ingestion_client()
+    result = client.rpc('ingest_mlb_games', {'games_payload': [asdict(game) for game in games_list]}).execute()
+    data = result.data or {}
+    return int(data.get('games', len(games_list)))
 
 
 def insert_odds_snapshots(snapshots: Iterable[NormalizedOddsSnapshot]) -> int:
-    supabase = get_supabase_admin()
-    rows = [
-        {
-            'provider_game_id': snapshot.provider_game_id,
-            'game_id': snapshot.game_id,
-            'home_team': snapshot.home_team,
-            'away_team': snapshot.away_team,
-            'bookmaker': snapshot.bookmaker,
-            'book': snapshot.bookmaker,
-            'line': snapshot.line,
-            'over': snapshot.over,
-            'under': snapshot.under,
-            'over_odds': snapshot.over,
-            'under_odds': snapshot.under,
-            'timestamp': snapshot.timestamp,
-            'market_phase': snapshot.market_phase,
-        }
-        for snapshot in snapshots
-    ]
-    if rows:
-        supabase.table('odds_snapshots').insert(rows).execute()
-    return len(rows)
+    snapshots_list = list(snapshots)
+    if not snapshots_list:
+        return 0
+    client = get_supabase_ingestion_client()
+    result = client.rpc(
+        'ingest_odds_snapshots',
+        {'snapshots_payload': [asdict(snapshot) for snapshot in snapshots_list]},
+    ).execute()
+    data = result.data or {}
+    return int(data.get('odds_snapshots', len(snapshots_list)))
 
 
 def upsert_game_results(games: Iterable[NormalizedGame]) -> int:
-    supabase = get_supabase_admin()
-    rows = [
-        {
-            'game_id': game.game_id,
-            'home_score': game.home_runs,
-            'away_score': game.away_runs,
-            'home_runs': game.home_runs,
-            'away_runs': game.away_runs,
-            'total_runs': game.total_runs,
-            'is_completed': True,
-            'finalized_at': _utc_now(),
-        }
-        for game in games
+    # Results are handled by ingest_mlb_games so games and results stay atomic.
+    games_list = list(games)
+    completed = [
+        game
+        for game in games_list
         if game.total_runs is not None and game.status.lower() in {'final', 'game over'}
     ]
-    if rows:
-        supabase.table('game_results').upsert(rows, on_conflict='game_id').execute()
-    return len(rows)
+    if not games_list:
+        return 0
+    client = get_supabase_ingestion_client()
+    result = client.rpc('ingest_mlb_games', {'games_payload': [asdict(game) for game in games_list]}).execute()
+    data = result.data or {}
+    return int(data.get('results', len(completed)))
 
 
 async def acquire_mlb_day(game_date: date) -> dict[str, int]:
@@ -226,9 +197,12 @@ async def acquire_mlb_day(game_date: date) -> dict[str, int]:
     client = MLBStatsClient(settings.mlb_stats_api_base_url)
     payload = await client.schedule(game_date)
     games = normalize_mlb_schedule(payload)
-    games_count = upsert_games(games)
-    results_count = upsert_game_results(games)
-    return {'games': games_count, 'results': results_count}
+    if not games:
+        return {'games': 0, 'results': 0}
+    rpc_client = get_supabase_ingestion_client()
+    result = rpc_client.rpc('ingest_mlb_games', {'games_payload': [asdict(game) for game in games]}).execute()
+    data = result.data or {}
+    return {'games': int(data.get('games', 0)), 'results': int(data.get('results', 0))}
 
 
 async def acquire_totals_market() -> dict[str, int]:
@@ -240,7 +214,10 @@ async def acquire_totals_market() -> dict[str, int]:
     tomorrow_payload = await mlb_client.schedule(date.fromordinal(date.today().toordinal() + 1))
     games = normalize_mlb_schedule(today_payload) + normalize_mlb_schedule(tomorrow_payload)
     if games:
-        upsert_games(games)
+        get_supabase_ingestion_client().rpc(
+            'ingest_mlb_games',
+            {'games_payload': [asdict(game) for game in games]},
+        ).execute()
 
     payload = await odds_client.totals_odds(
         regions=settings.odds_regions,
