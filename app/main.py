@@ -7,7 +7,8 @@ from app.config import get_settings
 from app.ev import build_signal
 from app.model import TotalsModel
 from app.schemas import BetSignal, CalibrationDetails, PredictionRequest
-from app.signals import log_signal_decision
+from app.signals import LatencyTimer, log_prediction_decision
+from app.truth_layer import get_latest_market_snapshot_before_prediction
 
 settings = get_settings()
 model = TotalsModel(settings.model_path)
@@ -39,6 +40,7 @@ def health() -> dict:
 
 @app.post('/predict', response_model=BetSignal)
 def predict(request: PredictionRequest) -> BetSignal:
+    timer = LatencyTimer()
     features = request.features
     raw_model_total = model.predict(features)
     calibration = calibrator.calibrate(raw_model_total, features.market_total)
@@ -79,6 +81,24 @@ def predict(request: PredictionRequest) -> BetSignal:
         ),
     )
     if request.log_decision:
-        log_signal_decision(response)
+        response_sent_at, latency_ms = timer.stop()
+        market_snapshot = get_latest_market_snapshot_before_prediction(
+            features.game_id,
+            timer.request_received_at,
+        ) or {
+            'id': None,
+            'timestamp': timer.request_received_at,
+            'line': features.market_total,
+            'over': features.over_price,
+            'under': features.under_price,
+        }
+        log_prediction_decision(
+            signal=response,
+            request_received_at=timer.request_received_at,
+            response_sent_at=response_sent_at,
+            latency_ms=latency_ms,
+            market_snapshot=market_snapshot,
+            features=features.model_dump(mode='json'),
+        )
         response.decision_logged = True
     return response
