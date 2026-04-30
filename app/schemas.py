@@ -31,6 +31,7 @@ class GameFeatures(BaseModel):
 
 class PredictionRequest(BaseModel):
     features: GameFeatures
+    log_decision: bool = False
 
 
 class CalibrationDetails(BaseModel):
@@ -56,3 +57,4 @@ class BetSignal(BaseModel):
     confidence: str
     reason: str
     calibration: CalibrationDetails
+    decision_logged: bool = False
