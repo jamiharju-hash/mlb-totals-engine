@@ -13,12 +13,12 @@ class Settings(BaseSettings):
     odds_api_key: str | None = None
     odds_regions: str = 'us'
     odds_markets: str = 'totals'
-    # Empty by default so The Odds API uses regions=us. Set explicitly only if
-    # the plan supports bookmaker filtering.
     odds_bookmakers: str | None = None
 
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_publishable_key: str | None = None
+    supabase_anon_key: str | None = None
 
     model_path: str = 'models/xgb_totals.joblib'
     calibrator_path: str = 'models/market_calibrator.joblib'
