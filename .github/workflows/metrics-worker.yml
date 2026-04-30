@@ -1,0 +1,23 @@
+name: Post-game Metrics Worker
+
+on:
+  schedule:
+    - cron: '30 5,8,11 * * *'
+  workflow_dispatch:
+
+jobs:
+  metrics-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run metrics worker
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m workers.metrics_worker
