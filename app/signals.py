@@ -12,6 +12,26 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def market_over_price(snapshot: dict[str, Any]) -> int:
+    value = snapshot.get('over') if snapshot.get('over') is not None else snapshot.get('over_odds')
+    if value is None:
+        raise ValueError('Market snapshot is missing over/over_odds price')
+    return int(value)
+
+
+def market_under_price(snapshot: dict[str, Any]) -> int:
+    value = snapshot.get('under') if snapshot.get('under') is not None else snapshot.get('under_odds')
+    if value is None:
+        raise ValueError('Market snapshot is missing under/under_odds price')
+    return int(value)
+
+
+def market_line(snapshot: dict[str, Any]) -> float:
+    if snapshot.get('line') is None:
+        raise ValueError('Market snapshot is missing line')
+    return float(snapshot['line'])
+
+
 def build_signal_payload(signal: BetSignal) -> dict[str, Any]:
     """Convert API signal response into a durable structured event payload."""
     payload = signal.model_dump(mode='json')
@@ -100,10 +120,10 @@ def log_prediction_decision(
         'feature_timestamp': feature_timestamp,
         'market_snapshot_id': market_snapshot.get('id'),
         'market_snapshot_timestamp': market_snapshot['timestamp'],
-        'market_phase': market_phase,
-        'market_total': signal.market_total,
-        'over_price': int(market_snapshot.get('over', -110)),
-        'under_price': int(market_snapshot.get('under', -110)),
+        'market_phase': market_snapshot.get('market_phase', market_phase),
+        'market_total': market_line(market_snapshot),
+        'over_price': market_over_price(market_snapshot),
+        'under_price': market_under_price(market_snapshot),
         'raw_model_total': signal.raw_model_total,
         'calibrated_model_total': signal.model_total,
         'edge_runs': signal.edge_runs,
