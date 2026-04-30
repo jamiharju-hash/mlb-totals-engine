@@ -19,16 +19,25 @@ class OddsAPIClient:
     ) -> list[dict]:
         if not self.api_key:
             raise RuntimeError('ODDS_API_KEY is required for odds ingestion')
+
         params = {
             'apiKey': self.api_key,
-            'regions': regions,
             'markets': markets,
             'oddsFormat': 'american',
             'dateFormat': 'iso',
         }
+        # The Odds API accepts either regions or bookmakers. Passing both can
+        # reject the request on some plans/endpoints, so prefer explicit
+        # bookmakers when configured and otherwise fall back to regions.
         if bookmakers:
             params['bookmakers'] = bookmakers
+        else:
+            params['regions'] = regions
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(f'{self.base_url}/sports/{sport}/odds', params=params)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(f'Odds API request failed: {response.status_code} {response.text}') from exc
             return response.json()
