@@ -31,17 +31,36 @@ def get_supabase_admin() -> Client:
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
 
 
+@lru_cache
+def get_supabase_ingestion_client() -> Client:
+    """Return a restricted client for ingestion RPC calls.
+
+    GitHub Actions uses this path so it does not need SUPABASE_SERVICE_ROLE_KEY.
+    The database exposes only narrow SECURITY DEFINER RPC functions for this
+    client; direct table writes remain blocked by RLS.
+    """
+    settings = get_settings()
+    if not settings.supabase_url:
+        raise RuntimeError('SUPABASE_URL is required')
+    _validate_supabase_url(settings.supabase_url)
+
+    key = settings.supabase_publishable_key or settings.supabase_anon_key
+    if not key:
+        raise RuntimeError('SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY is required for ingestion RPC')
+
+    return create_client(settings.supabase_url, key)
+
+
 def assert_supabase_writable() -> None:
-    """Fail fast when the service-role client cannot access required tables."""
-    client = get_supabase_admin()
-    required_tables = ('games', 'game_results', 'odds_snapshots')
-    for table in required_tables:
-        try:
-            client.table(table).select('*').limit(1).execute()
-        except Exception as exc:  # noqa: BLE001 - include table name in operational failure
-            raise RuntimeError(f'Supabase preflight failed for table {table}: {exc}') from exc
+    """Fail fast when the ingestion RPC client cannot call required functions."""
+    # Use RPC availability instead of direct table writes so GitHub Actions can
+    # operate without a service-role secret.
+    client = get_supabase_ingestion_client()
+    try:
+        client.rpc('ingest_mlb_games', {'games_payload': []}).execute()
+        client.rpc('ingest_odds_snapshots', {'snapshots_payload': []}).execute()
+    except Exception as exc:  # noqa: BLE001 - include operational failure
+        raise RuntimeError(f'Supabase ingestion RPC preflight failed: {exc}') from exc
 
 
-# Backward-compatible alias for modules that expect `client`.
-# Prefer get_supabase_admin() in new code so env validation happens at runtime.
 client = get_supabase_admin
