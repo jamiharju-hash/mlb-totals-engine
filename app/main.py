@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from app.calibration import load_calibrator
 from app.config import get_settings
@@ -107,13 +107,12 @@ def predict(request: PredictionRequest) -> BetSignal:
         market_snapshot = get_latest_market_snapshot_before_prediction(
             features.game_id,
             timer.request_received_at,
-        ) or {
-            'id': None,
-            'timestamp': timer.request_received_at,
-            'line': features.market_total,
-            'over': features.over_price,
-            'under': features.under_price,
-        }
+        )
+        if market_snapshot is None:
+            raise HTTPException(
+                status_code=409,
+                detail='Cannot log production prediction without a stored market snapshot at or before prediction timestamp.',
+            )
         log_prediction_decision(
             signal=response,
             request_received_at=timer.request_received_at,
