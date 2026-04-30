@@ -38,6 +38,23 @@ The system should be evaluated against these production criteria:
 
 A model should not be considered production-valid unless it demonstrates positive CLV over a meaningful sample. ROI without positive CLV should be treated as variance, not durable edge.
 
+### Time Integrity Contract
+
+All data used in predictions must obey the project Time Integrity Contract.
+
+Mandatory rules:
+
+```text
+feature_timestamp <= prediction_timestamp
+market_snapshot_timestamp <= prediction_timestamp
+closing_snapshot_timestamp <= game_start_timestamp
+no post-game data in features
+```
+
+The market line used for prediction must be the line available at prediction time. The closing line must be the last available valid line before game start. Any violation invalidates CLV, backtest results, and model evaluation for the affected prediction.
+
+Full contract: `docs/time_integrity_contract.md`.
+
 ### Core Functionality
 
 The MVP includes:
@@ -152,6 +169,8 @@ mlb-totals-engine/
 │   ├── schemas.py
 │   ├── signals.py
 │   └── truth_layer.py
+├── docs/
+│   └── time_integrity_contract.md
 ├── pipeline/
 │   ├── __init__.py
 │   ├── backtest.py
@@ -189,83 +208,11 @@ mlb-totals-engine/
 └── requirements.txt
 ```
 
-### Backend Directories
+### Documentation
 
-#### `app/`
+#### `docs/time_integrity_contract.md`
 
-Application code for the FastAPI service and betting engine.
-
-- `main.py`: FastAPI app and `/predict` endpoint.
-- `config.py`: Environment settings via Pydantic Settings.
-- `schemas.py`: API models including `PredictionRequest`, `GameFeatures`, `BetSignal`, and calibration details.
-- `model.py`: Total-runs model wrapper. Loads XGBoost artifact when available and provides deterministic fallback behavior.
-- `calibration.py`: Market distribution calibration layer.
-- `ev.py`: Edge calculation, expected value, Kelly fraction, staking, and bet/no-bet logic.
-- `signals.py`: Structured signal payloads, prediction logging, and latency timer.
-- `truth_layer.py`: Time-consistent truth linkage between prediction timestamp, market snapshot, closing snapshot, and final result.
-
-#### `app/clients/`
-
-External API clients.
-
-- `mlb_stats.py`: Async MLB Stats API client.
-- `odds_api.py`: Async The Odds API totals client.
-
-#### `app/db/`
-
-Database clients.
-
-- `supabase_admin.py`: Backend-only Supabase admin client using `SUPABASE_SERVICE_ROLE_KEY`. Never expose this in frontend code.
-
-#### `app/ingestion/`
-
-Data acquisition and persistence helpers.
-
-- `data_acquisition.py`: Normalizes MLB schedule/results and totals odds snapshots.
-- `odds_store.py`: Stores odds snapshots with validation and timestamp normalization.
-
-### Pipeline Directory
-
-#### `pipeline/`
-
-Offline and worker-style scripts.
-
-- `feature_engineering.py`: Builds model-ready features including pitching differential, offensive efficiency, bullpen fatigue, lineup strength, park/weather adjustments, and market embeddings.
-- `train.py`: Trains XGBoost model using `TimeSeriesSplit` and saves both model and market calibrator artifacts.
-- `backtest.py`: Simulates historical betting decisions.
-- `metrics.py`: Calculates CLV, grades bets, and evaluates ROI.
-
-### Supabase Migrations
-
-#### `supabase/migrations/`
-
-Database schema and RLS migrations.
-
-- `001_force_rls_all_tables.sql`: Enables and forces RLS across public tables.
-- `002_signal_decisions.sql`: Legacy signal decision audit table.
-- `003_core_betting_tables.sql`: Core tables: `games`, `odds_snapshots`, `game_results`, `model_runs`.
-- `004_time_consistent_truth_layer.sql`: Adds timestamp linkage and `prediction_truth_links`.
-- `005_predictions_features_metrics.sql`: Adds canonical `predictions_log`, `features`, `bets`, and `daily_metrics`.
-- `006_dashboard_read_models.sql`: Adds dashboard read policies, `market_phase`, indexes, and `dashboard_summary` view.
-
-### Frontend Directory
-
-#### `frontend/`
-
-Internal operator dashboard.
-
-- `app/page.tsx`: Main dashboard screen with health cards, CLV chart, ROI chart, and active/recent signals table.
-- `app/layout.tsx`: Root layout and metadata.
-- `app/globals.css`: Tailwind base styles.
-- `lib/supabase.ts`: Browser Supabase client using publishable key only.
-- `.env.example`: Frontend env variables.
-- `package.json`: Next.js frontend dependencies and scripts.
-
-### Tests
-
-#### `tests/`
-
-- `test_ev.py`: Unit tests for odds conversion, EV thresholding, and bet signal generation.
+Mandatory validity contract for predictions, CLV, backtests, ROI, and model evaluation. Any violation invalidates the affected record.
 
 ---
 
@@ -282,6 +229,36 @@ Internal operator dashboard.
 7. Log both bet and no-bet decisions where relevant.
 8. Use market timestamps available at prediction time only.
 
+### Time Integrity Contract
+
+This is mandatory. It is not a best-practice note.
+
+Every prediction, backtest row, CLV calculation, and model evaluation must satisfy:
+
+```text
+feature_timestamp <= prediction_timestamp
+market_snapshot_timestamp <= prediction_timestamp
+closing_snapshot_timestamp <= game_start_timestamp
+```
+
+No post-game data is allowed in features.
+
+The prediction-time market line must be selected as:
+
+```text
+latest odds snapshot where timestamp <= prediction_timestamp
+```
+
+The closing line must be selected as:
+
+```text
+latest odds snapshot where timestamp <= game_start_timestamp
+```
+
+If this cannot be proven, mark the record `VOID` or keep it `PENDING`. Do not include it in CLV, ROI, backtest, calibration, model evaluation, or success criteria metrics.
+
+Full contract: `docs/time_integrity_contract.md`.
+
 ### Python Style
 
 - Use Python 3.12-compatible syntax.
@@ -293,56 +270,6 @@ Internal operator dashboard.
 - Isolate database writes behind explicit functions.
 - Avoid import-time failures from missing secrets. Use lazy initialization for clients that require env variables.
 
-### Python Linting
-
-Ruff is the configured Python linter.
-
-Run:
-
-```bash
-ruff check app pipeline tests
-```
-
-### Python Testing
-
-Run:
-
-```bash
-pytest -q
-```
-
-Recommended test categories:
-
-- EV and Kelly math.
-- Bet/no-bet decision thresholds.
-- CLV calculation for OVER and UNDER.
-- Timestamp-order constraints.
-- Calibration behavior.
-- Prediction logging payload integrity.
-
-### FastAPI Standards
-
-- Endpoint responses must use Pydantic response models.
-- `/predict` must return a structured `BetSignal`.
-- Logging should be opt-in via `log_decision` to avoid polluting production tables during dry runs.
-- Request latency should be measured server-side.
-- Prediction logging must use the latest market snapshot with `timestamp <= prediction_timestamp`.
-
-### Supabase / Database Standards
-
-- RLS must be enabled and forced on all public tables.
-- Service role key must be backend-only.
-- Frontend uses publishable key and SELECT-only policies.
-- Canonical evaluation should use `predictions_log`, not legacy `signal_decisions`.
-- `predictions_log` must preserve:
-  - `prediction_timestamp`
-  - `market_snapshot_timestamp`
-  - `closing_snapshot_timestamp`
-  - `result_finalized_at`
-  - `latency_ms`
-  - `truth_status`
-- Never update historical prediction inputs after logging. Add derived evaluation fields only after closing/result availability.
-
 ### Time-Consistency Rules
 
 All evaluation records must satisfy:
@@ -350,11 +277,11 @@ All evaluation records must satisfy:
 ```text
 market_snapshot_timestamp <= prediction_timestamp
 feature_timestamp <= prediction_timestamp
-closing_snapshot_timestamp >= prediction_timestamp
-result_finalized_at >= prediction_timestamp
+closing_snapshot_timestamp <= game_start_timestamp
+result_finalized_at >= game_start_timestamp
 ```
 
-No feature or market input may come from the future relative to the prediction timestamp.
+No feature or market input may come from the future relative to the prediction timestamp. No closing line may come from after game start.
 
 ### ML Standards
 
@@ -364,32 +291,7 @@ No feature or market input may come from the future relative to the prediction t
 - Store model artifacts under `models/`, but do not commit binary model files.
 - Evaluate by CLV and post-vig ROI, not only MAE/RMSE.
 - Backtests must use only features available before prediction time.
-
-### Frontend Standards
-
-- Use TypeScript with strict mode.
-- Use Tailwind utility classes.
-- Keep Supabase frontend client read-only.
-- Use dashboard views and read-only tables only.
-- Do not include service role keys or backend secrets in frontend env files.
-- Use `NEXT_PUBLIC_` prefix only for safe publishable frontend values.
-
-### Environment Files
-
-Backend local runtime:
-
-```bash
-cp .env.backend.example .env
-```
-
-Frontend local runtime:
-
-```bash
-cd frontend
-cp .env.example .env.local
-```
-
-Never commit real `.env` files.
+- Backtests must exclude or mark `VOID` any row that violates the Time Integrity Contract.
 
 ---
 
@@ -408,29 +310,7 @@ Acceptance criteria:
 - Response includes EV and Kelly-based stake.
 - Response includes bet/no-bet decision.
 - Optional logging writes to `predictions_log`.
-
-#### Decision Logging Flow
-
-As an operator, I want every logged prediction to include the market snapshot available at prediction time so that CLV and ROI can be audited without leakage.
-
-Acceptance criteria:
-
-- `market_snapshot_timestamp <= prediction_timestamp`.
-- Prediction record stores request and response timestamps.
-- Prediction record stores latency in milliseconds.
-- Prediction record starts with `truth_status = PENDING`.
-
-#### Daily Pipeline Flow
-
-As an operator, I want scheduled workers to ingest games, odds, features, predictions, and results so that the system continuously updates the betting intelligence loop.
-
-Acceptance criteria:
-
-- Odds ingestion runs every 5 minutes.
-- MLB data ingestion runs hourly.
-- Training runs weekly.
-- Metrics worker runs post-game.
-- Data lag remains below 60 seconds for live odds snapshots when the system is active.
+- Logged records obey the Time Integrity Contract.
 
 #### Evaluation Flow
 
@@ -438,32 +318,12 @@ As an operator, I want predictions, closing lines, and results joined into a sin
 
 Acceptance criteria:
 
-- Closing line is reconstructed from odds snapshots.
+- Closing line is reconstructed from the last valid odds snapshot before game start.
 - CLV is calculated by side.
 - Bets are graded after final result.
 - ROI is calculated post-vig.
 - Daily metrics update `daily_metrics`.
-
-#### Dashboard Flow
-
-As an operator, I want a dashboard that shows current health and edge visibility so that I can quickly determine whether the system is performing.
-
-Acceptance criteria:
-
-- Dashboard shows today’s games.
-- Dashboard shows active signals.
-- Dashboard shows 7-day average CLV.
-- Dashboard shows rolling ROI.
-- Dashboard shows bet count.
-- Dashboard shows data lag.
-- Dashboard includes CLV and ROI charts.
-- Dashboard uses read-only Supabase client.
-
-### External Paid Subscriber — V1 Optional
-
-As a subscriber, I want to consume signals only, without access to internal model logs, feature data, or operational dashboards.
-
-This is out of scope for MVP and belongs to a future V1 extension with Stripe, auth, signal feed API, and push notifications.
+- Records violating time integrity are excluded from metrics.
 
 ---
 
@@ -473,23 +333,9 @@ This is out of scope for MVP and belongs to a future V1 extension with Stripe, a
 
 #### `GET /health`
 
-Purpose:
-
 Returns service status and model/calibrator load state.
 
-Example response:
-
-```json
-{
-  "status": "ok",
-  "model_loaded": true,
-  "calibrator_loaded": true
-}
-```
-
 #### `POST /predict`
-
-Purpose:
 
 Predicts MLB total runs, calibrates output to market distribution, calculates EV and Kelly stake, determines bet/no-bet decision, and optionally logs the decision.
 
@@ -505,196 +351,9 @@ Responsibilities:
 8. Latency measurement.
 9. Time-consistent market snapshot linkage.
 
-Example request:
-
-```json
-{
-  "features": {
-    "game_id": "nyy-bos-2026-04-30",
-    "home_team": "BOS",
-    "away_team": "NYY",
-    "market_total": 8.5,
-    "over_price": -105,
-    "under_price": -115,
-    "home_sp_era": 4.6,
-    "away_sp_era": 4.2,
-    "home_bullpen_era_7d": 4.8,
-    "away_bullpen_era_7d": 3.9,
-    "home_ops_14d": 0.760,
-    "away_ops_14d": 0.780,
-    "park_factor": 1.05,
-    "temperature_f": 74,
-    "wind_out_mph": 8
-  },
-  "log_decision": true
-}
-```
-
-Example response:
-
-```json
-{
-  "game_id": "nyy-bos-2026-04-30",
-  "side": "OVER",
-  "model_total": 8.72,
-  "raw_model_total": 8.95,
-  "market_total": 8.5,
-  "edge_runs": 0.22,
-  "estimated_probability": 0.538,
-  "break_even_probability": 0.5122,
-  "expected_value": 0.027,
-  "stake": 50.0,
-  "confidence": "MEDIUM",
-  "reason": "Model total exceeds market threshold with positive expected value.",
-  "calibration": {
-    "raw_total": 8.95,
-    "calibrated_total": 8.72,
-    "residual_vs_market": 0.22,
-    "market_percentile": 0.55,
-    "model_percentile": 0.61,
-    "calibration_method": "empirical_quantile_market_distribution"
-  },
-  "decision_logged": true
-}
-```
-
-### MLB Stats API Integration
-
-Client:
-
-```text
-app/clients/mlb_stats.py
-```
-
-Used for:
-
-- Daily schedule.
-- Game metadata.
-- Teams.
-- Probable pitchers.
-- Boxscores.
-- Linescores.
-- Final scores and total runs.
-
-Primary acquisition function:
-
-```python
-await acquire_mlb_day(game_date)
-```
-
-Storage targets:
-
-- `games`
-- `game_results`
-
-### The Odds API Integration
-
-Client:
-
-```text
-app/clients/odds_api.py
-```
-
-Used for:
-
-- MLB totals market snapshots.
-- Bookmaker totals lines.
-- Over/under prices.
-- Market timestamps.
-
-Primary acquisition function:
-
-```python
-await acquire_totals_market()
-```
-
-Storage target:
-
-- `odds_snapshots`
-
-Required production behavior:
-
-- Run every 5 minutes or faster if API quota allows.
-- Store every snapshot.
-- Tag market phase:
-  - `opening`
-  - `pre_lineup`
-  - `post_lineup`
-  - `closing`
-  - `unknown`
-- Preserve original timestamp.
-- Do not overwrite historical snapshots.
-
-### Supabase Backend Integration
-
-Backend admin client:
-
-```text
-app/db/supabase_admin.py
-```
-
-Usage:
-
-```python
-from app.db.supabase_admin import get_supabase_admin
-
-supabase = get_supabase_admin()
-```
-
-Required env:
-
-```env
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-```
-
-Rules:
-
-- Use only in backend code.
-- Never import or expose this in frontend.
-- Service role bypasses RLS and must be treated as a secret.
-
-### Supabase Frontend Integration
-
-Frontend client:
-
-```text
-frontend/lib/supabase.ts
-```
-
-Required env:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-```
-
-Rules:
-
-- Read-only dashboard usage only.
-- Must not use service role key.
-- Relies on SELECT-only RLS policies.
-
-### Database Tables
-
-Core tables:
-
-| Table | Purpose |
-|---|---|
-| `games` | MLB schedule and game metadata |
-| `odds_snapshots` | Market totals snapshots over time |
-| `features` | Internal feature snapshots |
-| `predictions_log` | Canonical prediction and evaluation log |
-| `game_results` | Final score and total runs ground truth |
-| `prediction_truth_links` | Time-consistent linkage between prediction, market, closing, and result |
-| `signal_decisions` | Legacy structured signal audit log |
-| `model_runs` | Training run metadata and model metrics |
-| `bets` | Optional paper/execution layer |
-| `daily_metrics` | Dashboard metrics and success criteria tracking |
-
 ### Closing Line Reconstruction
 
-Closing line reconstruction should select the latest valid market snapshot before first pitch or another approved cutoff.
+Closing line reconstruction must select the latest valid market snapshot before game start.
 
 Required invariant:
 
@@ -702,7 +361,7 @@ Required invariant:
 prediction_timestamp <= closing_snapshot_timestamp <= game_start_timestamp
 ```
 
-If game start timestamp is unavailable, do not treat the latest arbitrary snapshot as production-grade closing line. Mark evaluation as pending or unknown until the cutoff is reliable.
+If game start timestamp is unavailable, do not treat the latest arbitrary snapshot as production-grade closing line. Mark evaluation as `PENDING` or `VOID` until the cutoff is reliable.
 
 ### CLV Calculation
 
@@ -720,45 +379,7 @@ CLV = bet_market_total - closing_total
 
 Positive CLV means the bet beat the closing market.
 
-### Metrics Service
-
-The metrics worker should run post-game and update:
-
-- `predictions_log.closing_snapshot_id`
-- `predictions_log.closing_snapshot_timestamp`
-- `predictions_log.closing_total`
-- `predictions_log.total_runs`
-- `predictions_log.clv`
-- `predictions_log.pnl`
-- `predictions_log.roi`
-- `predictions_log.truth_status`
-- `daily_metrics.avg_clv`
-- `daily_metrics.clv_win_rate`
-- `daily_metrics.roi`
-- `daily_metrics.avg_latency_ms`
-- `daily_metrics.p95_latency_ms`
-- `daily_metrics.max_data_lag_seconds`
-- `daily_metrics.success_criteria_pass`
-
-### Dashboard Integration
-
-Frontend reads from:
-
-- `dashboard_summary`
-- `predictions_log`
-- `daily_metrics`
-
-Main dashboard components:
-
-- Today’s games.
-- Active signals.
-- Avg CLV last 7 days.
-- Rolling ROI.
-- Bet count.
-- Data lag.
-- CLV chart.
-- ROI chart.
-- Recent active signals table.
+CLV must not be calculated if the Time Integrity Contract is violated.
 
 ### Local Development Commands
 
@@ -786,19 +407,4 @@ Tests and lint:
 ```bash
 ruff check app pipeline tests
 pytest -q
-```
-
-Training:
-
-```bash
-python pipeline/train.py \
-  --data data/processed/training.csv \
-  --out models/xgb_totals.joblib \
-  --calibrator-out models/market_calibrator.joblib
-```
-
-Backtest:
-
-```bash
-python pipeline/backtest.py --data data/processed/backtest_predictions.csv
 ```
