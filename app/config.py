@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str | None = None
 
     model_path: str = 'models/xgb_totals.joblib'
+    calibrator_path: str = 'models/market_calibrator.joblib'
     edge_threshold_runs: float = 0.25
     min_ev: float = 0.015
     kelly_fraction: float = 0.25
