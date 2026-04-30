@@ -28,6 +28,7 @@ class NormalizedGame:
 @dataclass(frozen=True)
 class NormalizedOddsSnapshot:
     provider_game_id: str
+    game_id: str | None
     home_team: str
     away_team: str
     bookmaker: str
@@ -35,10 +36,17 @@ class NormalizedOddsSnapshot:
     over: int
     under: int
     timestamp: str
+    market_phase: str
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _market_phase(now: datetime | None = None) -> str:
+    # Until first-pitch cutoff logic is book-specific, default to unknown.
+    # Workers can later override this based on game_datetime proximity.
+    return 'unknown'
 
 
 def normalize_mlb_schedule(payload: dict[str, Any]) -> list[NormalizedGame]:
@@ -98,6 +106,7 @@ def normalize_totals_odds(payload: Iterable[dict[str, Any]]) -> list[NormalizedO
                 snapshots.append(
                     NormalizedOddsSnapshot(
                         provider_game_id=provider_game_id,
+                        game_id=None,
                         home_team=home_team,
                         away_team=away_team,
                         bookmaker=bookmaker_key,
@@ -105,33 +114,69 @@ def normalize_totals_odds(payload: Iterable[dict[str, Any]]) -> list[NormalizedO
                         over=int(over.get('price')),
                         under=int(under.get('price')),
                         timestamp=timestamp,
+                        market_phase=_market_phase(),
                     )
                 )
     return snapshots
 
 
-def upsert_games(games: Iterable[NormalizedGame]) -> None:
+def upsert_games(games: Iterable[NormalizedGame]) -> int:
     supabase = get_supabase_admin()
-    rows = [game.__dict__ for game in games]
+    rows = [
+        {
+            'id': game.game_id,
+            'game_date': game.game_date,
+            'game_datetime': game.game_datetime,
+            'home_team': game.home_team,
+            'away_team': game.away_team,
+            'home_probable_pitcher': game.home_probable_pitcher,
+            'away_probable_pitcher': game.away_probable_pitcher,
+            'status': game.status,
+            'updated_at': _utc_now(),
+        }
+        for game in games
+    ]
     if rows:
-        supabase.table('games').upsert(rows, on_conflict='game_id').execute()
+        supabase.table('games').upsert(rows, on_conflict='id').execute()
+    return len(rows)
 
 
-def insert_odds_snapshots(snapshots: Iterable[NormalizedOddsSnapshot]) -> None:
+def insert_odds_snapshots(snapshots: Iterable[NormalizedOddsSnapshot]) -> int:
     supabase = get_supabase_admin()
-    rows = [snapshot.__dict__ for snapshot in snapshots]
+    rows = [
+        {
+            'provider_game_id': snapshot.provider_game_id,
+            'game_id': snapshot.game_id,
+            'home_team': snapshot.home_team,
+            'away_team': snapshot.away_team,
+            'bookmaker': snapshot.bookmaker,
+            'book': snapshot.bookmaker,
+            'line': snapshot.line,
+            'over': snapshot.over,
+            'under': snapshot.under,
+            'over_odds': snapshot.over,
+            'under_odds': snapshot.under,
+            'timestamp': snapshot.timestamp,
+            'market_phase': snapshot.market_phase,
+        }
+        for snapshot in snapshots
+    ]
     if rows:
         supabase.table('odds_snapshots').insert(rows).execute()
+    return len(rows)
 
 
-def upsert_game_results(games: Iterable[NormalizedGame]) -> None:
+def upsert_game_results(games: Iterable[NormalizedGame]) -> int:
     supabase = get_supabase_admin()
     rows = [
         {
             'game_id': game.game_id,
+            'home_score': game.home_runs,
+            'away_score': game.away_runs,
             'home_runs': game.home_runs,
             'away_runs': game.away_runs,
             'total_runs': game.total_runs,
+            'is_completed': True,
             'finalized_at': _utc_now(),
         }
         for game in games
@@ -139,6 +184,7 @@ def upsert_game_results(games: Iterable[NormalizedGame]) -> None:
     ]
     if rows:
         supabase.table('game_results').upsert(rows, on_conflict='game_id').execute()
+    return len(rows)
 
 
 async def acquire_mlb_day(game_date: date) -> dict[str, int]:
@@ -146,9 +192,9 @@ async def acquire_mlb_day(game_date: date) -> dict[str, int]:
     client = MLBStatsClient(settings.mlb_stats_api_base_url)
     payload = await client.schedule(game_date)
     games = normalize_mlb_schedule(payload)
-    upsert_games(games)
-    upsert_game_results(games)
-    return {'games': len(games), 'results': sum(1 for game in games if game.total_runs is not None)}
+    games_count = upsert_games(games)
+    results_count = upsert_game_results(games)
+    return {'games': games_count, 'results': results_count}
 
 
 async def acquire_totals_market() -> dict[str, int]:
@@ -160,5 +206,5 @@ async def acquire_totals_market() -> dict[str, int]:
         bookmakers=settings.odds_bookmakers,
     )
     snapshots = normalize_totals_odds(payload)
-    insert_odds_snapshots(snapshots)
-    return {'odds_snapshots': len(snapshots)}
+    inserted = insert_odds_snapshots(snapshots)
+    return {'odds_snapshots': inserted}
