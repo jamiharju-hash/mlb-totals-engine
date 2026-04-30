@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 10
     env:
       SUPABASE_URL: https://ohykyscckijbphenugkb.supabase.co
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_jV3R6BovyhHyFIcQ9PNF9Q_HV-fDqBo
     steps:
       - uses: actions/checkout@v4
       - name: Show workflow context
@@ -23,16 +23,16 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Validate required secrets
+      - name: Validate ingestion RPC env
         run: |
           echo "SUPABASE_URL configured for project ohykyscckijbphenugkb"
-          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing secret: SUPABASE_SERVICE_ROLE_KEY" && exit 1)
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || (echo "Missing SUPABASE_PUBLISHABLE_KEY" && exit 1)
           python - <<'PY'
           from app.config import get_settings
           settings = get_settings()
           assert settings.supabase_url == 'https://ohykyscckijbphenugkb.supabase.co', 'Unexpected SUPABASE_URL'
-          assert settings.supabase_service_role_key, 'Settings did not receive SUPABASE_SERVICE_ROLE_KEY'
-          print('Supabase env validated in Python settings')
+          assert settings.supabase_publishable_key, 'Settings did not receive SUPABASE_PUBLISHABLE_KEY'
+          print('Supabase ingestion RPC env validated in Python settings')
           PY
       - name: Run MLB ingestion
         run: python -m workers.mlb_ingestion
