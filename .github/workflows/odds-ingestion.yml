@@ -9,25 +9,31 @@ jobs:
   odds-ingestion:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SUPABASE_URL: https://ohykyscckijbphenugkb.supabase.co
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_jV3R6BovyhHyFIcQ9PNF9Q_HV-fDqBo
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+      - name: Show workflow context
+        run: |
+          echo "Commit: $GITHUB_SHA"
+          echo "Branch: $GITHUB_REF_NAME"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Validate required secrets
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.VITE_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Validate ingestion RPC env
         run: |
           test -n "$ODDS_API_KEY" || (echo "Missing secret: ODDS_API_KEY" && exit 1)
-          test -n "$SUPABASE_URL" || (echo "Missing secret: SUPABASE_URL" && exit 1)
-          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing secret: SUPABASE_SERVICE_ROLE_KEY" && exit 1)
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || (echo "Missing SUPABASE_PUBLISHABLE_KEY" && exit 1)
+          python - <<'PY'
+          from app.config import get_settings
+          settings = get_settings()
+          assert settings.odds_api_key, 'Settings did not receive ODDS_API_KEY'
+          assert settings.supabase_publishable_key, 'Settings did not receive SUPABASE_PUBLISHABLE_KEY'
+          print('Odds ingestion env validated in Python settings')
+          PY
       - name: Run odds ingestion
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.VITE_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m workers.odds_ingestion
