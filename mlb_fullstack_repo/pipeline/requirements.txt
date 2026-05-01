@@ -1,0 +1,10 @@
+pandas
+numpy
+requests
+python-dotenv
+pydantic
+scikit-learn
+joblib
+kagglehub
+pybaseball
+MLB-StatsAPI
