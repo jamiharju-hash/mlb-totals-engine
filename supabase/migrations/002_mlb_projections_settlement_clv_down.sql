@@ -1,0 +1,17 @@
+ALTER TABLE public.mlb_projections
+  DROP COLUMN IF EXISTS season,
+  DROP COLUMN IF EXISTS model_version,
+  DROP COLUMN IF EXISTS odds_source,
+  DROP COLUMN IF EXISTS bookmaker,
+  DROP COLUMN IF EXISTS snapshot_ts,
+  DROP COLUMN IF EXISTS american_odds,
+  DROP COLUMN IF EXISTS stake_pct_bankroll,
+  DROP COLUMN IF EXISTS updated_at,
+  DROP COLUMN IF EXISTS result,
+  DROP COLUMN IF EXISTS settled_at,
+  DROP COLUMN IF EXISTS pnl_units,
+  DROP COLUMN IF EXISTS stake_amount_units,
+  DROP COLUMN IF EXISTS closing_decimal_odds,
+  DROP COLUMN IF EXISTS closing_american_odds,
+  DROP COLUMN IF EXISTS closing_implied_probability,
+  DROP COLUMN IF EXISTS clv_pct;
