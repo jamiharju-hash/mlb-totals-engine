@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid,
   ResponsiveContainer,
@@ -75,12 +75,13 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       if (!mounted) return;
-      setLoading((prev) => (updatedAt ? prev : true));
+      setLoading((prev) => (hasLoadedRef.current ? prev : true));
       try {
         const response = await fetch('/api/mlb-dashboard', { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -89,6 +90,7 @@ export default function DashboardPage() {
         setData(payload ?? {});
         setError(null);
         setUpdatedAt(new Date());
+        hasLoadedRef.current = true;
       } catch (e) {
         if (!mounted) return;
         setError(`Could not load dashboard. Check NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY and API route wiring. (${e instanceof Error ? e.message : 'unknown'})`);
@@ -103,7 +105,7 @@ export default function DashboardPage() {
       mounted = false;
       clearInterval(id);
     };
-  }, [updatedAt]);
+  }, []);
 
   const latestDate = data.dataState?.latestProjectionDate;
   const staleAge = useMemo(() => {
