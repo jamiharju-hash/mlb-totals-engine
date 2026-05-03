@@ -186,6 +186,32 @@ function apiErrorMessage(error: string | null): string | null {
   return `${error}. Check /api/mlb-dashboard and Supabase env vars.`;
 }
 
+function toCsv(rows: JsonRow[]): string {
+  if (rows.length === 0) return '';
+  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  const escape = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  return [headers.join(','), ...rows.map((row) => headers.map((header) => escape(row[header])).join(','))].join('\n');
+}
+
+function downloadCsv(payload: DashboardPayload | null) {
+  if (!payload) return;
+  const files: Array<{ name: string; rows: JsonRow[] }> = [
+    { name: 'projections', rows: payload.projections ?? [] },
+    { name: 'top_picks', rows: payload.topPicks ?? [] },
+    { name: 'team_market', rows: payload.teamMarket ?? [] },
+    { name: 'manual_overrides', rows: payload.manualOverrides ?? [] },
+  ];
+  files.forEach(({ name, rows }) => {
+    const content = toCsv(rows.length ? rows : [{ note: 'empty' }]);
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${name}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+}
+
 function sortRows(rows: JsonRow[], field: SortField, direction: SortDirection): JsonRow[] {
   const multiplier = direction === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
@@ -538,6 +564,7 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen px-6 py-8 md:px-10">
       <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex justify-end"><button type="button" onClick={() => downloadCsv(payload)} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">Export CSV bundle</button></div>
         <Header payload={payload} loading={isInitialLoading} error={sectionError} refreshing={refreshing} />
         <Section title="KPI strip" description="Eight executive summary cards from /api/mlb-dashboard.summary." loading={isInitialLoading} missing={Boolean(payload && !payload.summary)} error={sectionError} empty={!payload?.summary} emptyText="No summary found." severity={severity} demo={demo}><Kpis summary={payload?.summary ?? {}} /></Section>
         <Section title="Action panel" description="Top opportunities, fade candidates and operational warnings." loading={isInitialLoading} missing={Boolean(payload && !topPicks && !projections && !payload.dataState)} error={sectionError} empty={(topPicks ?? []).length === 0 && (projections ?? []).length === 0 && warnings.length === 0} emptyText="No action panel data found." severity={severity} demo={demo}><ActionPanel topPicks={topPicks ?? []} projections={projections ?? []} warnings={warnings} /></Section>
