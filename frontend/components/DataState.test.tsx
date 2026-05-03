@@ -8,6 +8,18 @@ test('renders DataState loading', () => {
   assert.match(html, /loading-skeleton/);
 });
 
+
+test('prioritizes state UI over children when state is provided', () => {
+  const html = renderToStaticMarkup(
+    <DataState state="loading">
+      <div>ready</div>
+    </DataState>
+  );
+
+  assert.match(html, /loading-skeleton/);
+  assert.doesNotMatch(html, /ready/);
+});
+
 test('renders empty, error, and children', () => {
   assert.match(renderToStaticMarkup(<DataState state="empty" message="No picks" />), /No picks/);
   assert.match(renderToStaticMarkup(<DataState state="error" />), /NEXT_PUBLIC_SUPABASE_URL/);

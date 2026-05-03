@@ -1,7 +1,7 @@
 import React, { type ReactNode } from 'react';
 
 export function DataState({ state, message, children }: { state?: 'loading' | 'empty' | 'error'; message?: string; children?: ReactNode }) {
-  if (!state || children) {
+  if (!state) {
     return <>{children}</>;
   }
 
