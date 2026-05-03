@@ -43,3 +43,5 @@ mlb_fullstack_repo/pipeline/data/exports/*
 .pytest_cache/
 .coverage
 htmlcov/
+# Node package directories
+**/node_modules/
