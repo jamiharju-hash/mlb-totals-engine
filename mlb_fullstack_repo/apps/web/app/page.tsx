@@ -39,7 +39,13 @@ export default async function Home() {
     return acc;
   }, {});
 
-  const topTeams = [...teamMarket]
+  const latestTeamMarketDate = teamMarket.reduce<string | null>((latest, row) => {
+    if (!latest || row.as_of_date > latest) return row.as_of_date;
+    return latest;
+  }, null);
+
+  const topTeams = teamMarket
+    .filter((row) => row.as_of_date === latestTeamMarketDate)
     .sort((a, b) => Number(b.value_score ?? -999) - Number(a.value_score ?? -999))
     .slice(0, 5);
 
