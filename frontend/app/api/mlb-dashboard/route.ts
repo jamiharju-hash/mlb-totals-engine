@@ -10,6 +10,8 @@ type QueryResponse<T> = {
 };
 
 export const dynamic = 'force-dynamic';
+const STARTING_BANKROLL_UNITS = Number(process.env.STARTING_BANKROLL_UNITS ?? 100);
+const PROJECTIONS_STALE_HOURS = Number(process.env.PROJECTIONS_STALE_HOURS ?? 24);
 
 function toNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -82,7 +84,7 @@ function isStale(dateValue: string | null): boolean {
   if (!dateValue) return false;
   const parsed = new Date(dateValue);
   if (Number.isNaN(parsed.getTime())) return false;
-  return Date.now() - parsed.getTime() >= 24 * 60 * 60 * 1000;
+  return Date.now() - parsed.getTime() >= PROJECTIONS_STALE_HOURS * 60 * 60 * 1000;
 }
 
 function readSettledRecord(rows: DbRow[]) {
@@ -114,12 +116,12 @@ function countPositiveClv(rows: DbRow[]) {
   };
 }
 
-function buildSummary(projections: DbRow[], teamMarket: DbRow[]) {
+function buildSummary(projections: DbRow[], teamMarket: DbRow[], settledRows: DbRow[]) {
   const edges = projections.map(getEdge);
   const positiveEdges = edges.filter((edge) => edge > 0);
   const actionable = projections.filter(isActionable);
   const bestTeam = [...teamMarket].sort((a, b) => getNumber(b, 'value_score', 'valueScore') - getNumber(a, 'value_score', 'valueScore'))[0];
-  const settled = projections.filter((row) => typeof row.result === 'string' && ['win', 'loss', 'push', 'void'].includes(String(row.result).toLowerCase()));
+  const settled = settledRows.filter((row) => typeof row.result === 'string' && ['win', 'loss', 'push', 'void'].includes(String(row.result).toLowerCase()));
   const pnl = settled.map((row) => toNumber(row.pnl_units)).filter((value): value is number => value !== null);
   const stake = settled.map((row) => toNumber(row.stake_amount_units)).filter((value): value is number => value !== null);
   const totalStake = stake.reduce((sum, value) => sum + value, 0);
@@ -140,9 +142,9 @@ function buildSummary(projections: DbRow[], teamMarket: DbRow[]) {
         }
       : null,
     realizedRoiPct: totalStake > 0 ? totalPnl / totalStake : null,
-    currentBankrollUnits: pnl.length > 0 ? 100 + totalPnl : null,
-    record: readSettledRecord(projections),
-    clv: countPositiveClv(projections),
+    currentBankrollUnits: pnl.length > 0 ? STARTING_BANKROLL_UNITS + totalPnl : null,
+    record: readSettledRecord(settledRows),
+    clv: countPositiveClv(settledRows),
   };
 }
 
@@ -162,7 +164,7 @@ function demoPayload(warnings: string[] = []) {
   ];
 
   return {
-    summary: buildSummary(projections, teamMarket),
+    summary: buildSummary(projections, teamMarket, []),
     topPicks: sortProjectionRows(projections.filter(isActionable)).slice(0, 5),
     projections,
     teamMarket,
@@ -228,7 +230,7 @@ export async function GET() {
   });
 
   const warnings: string[] = [];
-  const [projectionsResult, teamMarketResult, modelMetricsResult, manualOverridesResult, predictionsLogCount, dailyMetricsCount, oddsSnapshotsCount] = await Promise.allSettled([
+  const [projectionsResult, teamMarketResult, modelMetricsResult, manualOverridesResult, predictionsLogCount, dailyMetricsCount, oddsSnapshotsCount, predictionsLogSettledResult] = await Promise.allSettled([
     supabase.from('mlb_projections').select('*').order('game_date', { ascending: false }).order('edge_pct', { ascending: false }).limit(250),
     supabase.from('mlb_team_market_value').select('*').order('value_score', { ascending: false }).limit(100),
     supabase.from('mlb_model_metrics').select('*').order('as_of', { ascending: false }).limit(1).maybeSingle(),
@@ -236,23 +238,31 @@ export async function GET() {
     supabase.from('predictions_log').select('id', { count: 'exact', head: true }),
     supabase.from('daily_metrics').select('metric_date', { count: 'exact', head: true }),
     supabase.from('odds_snapshots').select('id', { count: 'exact', head: true }),
+    supabase.from('predictions_log').select('market,result,pnl,stake,clv,settled_at').not('result', 'is', null).limit(2000),
   ]);
 
   const projections = settledData<DbRow[]>(projectionsResult, [], 'mlb_projections', warnings);
   const teamMarket = settledData<DbRow[]>(teamMarketResult, [], 'mlb_team_market_value', warnings);
   const modelMetrics = settledData<DbRow | null>(modelMetricsResult, null, 'mlb_model_metrics', warnings);
   const manualOverrides = settledData<DbRow[]>(manualOverridesResult, [], 'mlb_manual_overrides', warnings);
+  const settledRows = settledData<DbRow[]>(predictionsLogSettledResult, [], 'predictions_log_settled', warnings);
   const latestProjectionDate = latestDate(projections, 'game_date');
   const stale = isStale(latestProjectionDate);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRows = projections.filter((row) => toStringValue(row.game_date) === today);
+  const latestSlateRows = latestProjectionDate ? projections.filter((row) => toStringValue(row.game_date) === latestProjectionDate) : [];
+  const displayRows = todayRows.length > 0 ? todayRows : latestSlateRows;
 
   if (projections.length === 0) warnings.push('No projections found.');
+  if (projections.length > 0 && todayRows.length === 0) warnings.push(`No projections found for ${today}; showing latest available slate ${latestProjectionDate}.`);
   if (teamMarket.length === 0) warnings.push('No team market value rows found.');
   if (!modelMetrics) warnings.push('No model metrics row found.');
   if (stale) warnings.push('Projection data is at least 1 day old.');
+  if (settledRows.length === 0) warnings.push('Realized ROI, bankroll, and record unavailable because predictions_log has no settled rows. Team market ROI is a proxy metric.');
 
   return NextResponse.json({
-    summary: buildSummary(projections, teamMarket),
-    topPicks: sortProjectionRows(projections.filter(isActionable)).slice(0, 10),
+    summary: buildSummary(displayRows, teamMarket, settledRows),
+    topPicks: sortProjectionRows(displayRows.filter(isActionable)).slice(0, 10),
     projections,
     teamMarket,
     modelMetrics,
