@@ -1,0 +1,51 @@
+datasets:
+  - slug: christophertreasure/major-league-baseball-vegas-data
+    name: Major League Baseball Vegas Data
+    source_url: https://www.kaggle.com/datasets/christophertreasure/major-league-baseball-vegas-data
+    sport: MLB
+    coverage:
+      season_min: 2012
+      season_max: 2021
+    priority: 1
+    target_tables:
+      - raw_kaggle_datasets
+      - raw_kaggle_odds
+      - odds_snapshots
+    expected_files:
+      - oddsDataMLB.csv
+    notes: >-
+      MLB-specific historical odds source. Treat as source-specific raw data first;
+      normalize only after validating column names and moneyline/totals semantics.
+
+  - slug: oliviersportsdata/us-sports-master-historical-closing-odds
+    name: US Sports Master Historical Closing Odds
+    source_url: https://www.kaggle.com/datasets/oliviersportsdata/us-sports-master-historical-closing-odds
+    sport: MLB
+    coverage:
+      season_min: 1998
+      season_max: 2026
+    priority: 2
+    target_tables:
+      - raw_kaggle_datasets
+      - raw_kaggle_odds
+      - odds_snapshots
+    expected_files:
+      - Sample_MLB_50rows.csv
+    sample_columns:
+      - Country
+      - Season
+      - Date
+      - Type
+      - Home_Team
+      - Home_Points
+      - Away_Points
+      - Away_Team
+      - Odds_Home
+      - Odds_Away
+      - End_Of_RT
+      - Number of Points - TOTAL
+      - Winning Margin
+    notes: >-
+      Multi-sport historical closing odds archive. For MLB rows, sample data exposes
+      moneyline home/away prices and final total points. It does not expose an over/under
+      closing total line in the shown sample, so do not treat Number of Points - TOTAL as a bookmaker total line.
