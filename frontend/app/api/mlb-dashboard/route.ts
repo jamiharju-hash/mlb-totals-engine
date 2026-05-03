@@ -203,7 +203,7 @@ function settledData<T>(result: PromiseSettledResult<QueryResponse<T>>, fallback
   return result.value.data ?? fallback;
 }
 
-function settledCount(result: PromiseSettledResult<QueryResponse<null>>, label: string, warnings: string[]): number {
+function settledCount(result: PromiseSettledResult<QueryResponse<unknown>>, label: string, warnings: string[]): number {
   if (result.status === 'rejected') {
     warnings.push(`${label} count failed.`);
     return 0;
