@@ -17,3 +17,29 @@ models/*.pkl
 data/raw/
 data/processed/
 .DS_Store
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# Pipeline data artifacts
+pipeline/data/raw/*
+pipeline/data/interim/*
+pipeline/data/features/*
+pipeline/data/exports/*
+mlb_fullstack_repo/pipeline/data/raw/*
+mlb_fullstack_repo/pipeline/data/interim/*
+mlb_fullstack_repo/pipeline/data/features/*
+mlb_fullstack_repo/pipeline/data/exports/*
+!pipeline/data/raw/.gitkeep
+!pipeline/data/interim/.gitkeep
+!pipeline/data/features/.gitkeep
+!pipeline/data/exports/.gitkeep
+!mlb_fullstack_repo/pipeline/data/raw/.gitkeep
+!mlb_fullstack_repo/pipeline/data/interim/.gitkeep
+!mlb_fullstack_repo/pipeline/data/features/.gitkeep
+!mlb_fullstack_repo/pipeline/data/exports/.gitkeep
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
