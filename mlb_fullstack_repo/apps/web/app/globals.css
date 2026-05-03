@@ -33,3 +33,10 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .metric-grid div { background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 12px; }
 .metric-grid span, .metric-grid strong { display: block; } .metric-grid strong { margin-top: 6px; font-size: 22px; }
 @media (max-width: 1000px) { .hero { flex-direction: column; align-items: stretch; } .timestamp { text-align: left; } .stats-grid, .metric-grid { grid-template-columns: 1fr; } }
+
+.bar-list { display: grid; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: 170px 1fr auto; align-items: center; gap: 12px; }
+.bar-label { color: var(--muted); text-transform: capitalize; font-size: 13px; letter-spacing: .03em; }
+.bar-track { width: 100%; height: 10px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, #2ee59d, #7aa7ff); }
+.bar-fill.secondary { background: linear-gradient(90deg, #7aa7ff, #a6bfff); }
