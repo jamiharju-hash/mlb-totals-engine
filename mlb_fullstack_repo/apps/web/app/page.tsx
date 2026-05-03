@@ -29,13 +29,30 @@ export default async function Home() {
   const avgEdge = projections.length ? projections.reduce((s, p) => s + Number(p.edge_pct ?? 0), 0) / projections.length : 0;
   const maxEdge = projections.length ? Math.max(...projections.map((p) => Number(p.edge_pct ?? 0))) : 0;
 
+  const signalCounts = projections.reduce<Record<string, number>>((acc, p) => {
+    acc[p.bet_signal] = (acc[p.bet_signal] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const marketCounts = projections.reduce<Record<string, number>>((acc, p) => {
+    acc[p.market] = (acc[p.market] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const topTeams = [...teamMarket]
+    .sort((a, b) => Number(b.value_score ?? -999) - Number(a.value_score ?? -999))
+    .slice(0, 5);
+
+  const maxSignalCount = Math.max(1, ...Object.values(signalCounts));
+  const maxMarketCount = Math.max(1, ...Object.values(marketCounts));
+
   return (
     <main className="container">
       <header className="hero">
         <div>
           <div className="eyebrow">MLB Projection Engine</div>
-          <h1>Daily betting projections</h1>
-          <p>Fullstack projection platform using Supabase, Next.js and a Python data pipeline.</p>
+          <h1>Analytics Dashboard</h1>
+          <p>Executive view of daily model opportunities, signal mix, and team-level value concentration.</p>
         </div>
         <div className="timestamp">Model<br /><strong>{metrics?.model_version ?? "not available"}</strong></div>
       </header>
@@ -46,6 +63,75 @@ export default async function Home() {
         <StatCard label="Average edge" value={pct(avgEdge)} />
         <StatCard label="Max edge" value={pct(maxEdge)} />
         <StatCard label="Teams tracked" value={teamMarket.length} />
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <h2>Signal distribution</h2>
+            <p>Share of projection recommendations by confidence band.</p>
+          </div>
+        </div>
+        <div className="bar-list">
+          {Object.entries(signalCounts).map(([signal, count]) => (
+            <div key={signal} className="bar-row">
+              <div className="bar-label">{signal.replace("_", " ")}</div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: `${(count / maxSignalCount) * 100}%` }} /></div>
+              <strong>{count}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <h2>Market mix</h2>
+            <p>Current distribution across moneyline, runline, and totals markets.</p>
+          </div>
+        </div>
+        <div className="bar-list">
+          {Object.entries(marketCounts).map(([market, count]) => (
+            <div key={market} className="bar-row">
+              <div className="bar-label">{market}</div>
+              <div className="bar-track"><div className="bar-fill secondary" style={{ width: `${(count / maxMarketCount) * 100}%` }} /></div>
+              <strong>{count}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <h2>Top team opportunities</h2>
+            <p>Highest value_score teams from the latest team-market snapshot.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Value score</th>
+                <th>ML ROI</th>
+                <th>RL ROI</th>
+                <th>OU ROI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topTeams.map((row) => (
+                <tr key={row.team}>
+                  <td>{row.team}</td>
+                  <td>{row.value_score ?? "—"}</td>
+                  <td>{pct(row.ml_roi_ytd)}</td>
+                  <td>{pct(row.rl_roi_ytd)}</td>
+                  <td>{pct(row.ou_roi_ytd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <ProjectionTable rows={projections} />
