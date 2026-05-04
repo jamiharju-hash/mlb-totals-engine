@@ -408,3 +408,15 @@ Tests and lint:
 ruff check app pipeline tests
 pytest -q
 ```
+
+## 8. Prompt Guardrails for Route Refactors
+
+### Prompt 1
+
+- Refactor the existing `frontend/app/api/mlb-dashboard/route.ts`.
+- Do not create a second route file.
+- Preserve exported `GET` handler signature and Next.js route conventions.
+
+### Final Acceptance Check
+
+- Search for duplicate `mlb-dashboard` route handlers; there must be exactly one.
