@@ -219,7 +219,19 @@ function settledCount(result: PromiseSettledResult<QueryResponse<unknown>>, labe
   return result.value.count ?? 0;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const expectedSecret = process.env.PIPELINE_INGEST_SECRET;
+
+  if (!expectedSecret) {
+    console.error('PIPELINE_INGEST_SECRET is not set.');
+    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
+  }
+
+  const authorization = request.headers.get('authorization');
+  if (!authorization || authorization !== `Bearer ${expectedSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
