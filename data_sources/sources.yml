@@ -1,0 +1,249 @@
+sources:
+  mlb_stats_api:
+    type: http_json
+    cost: free
+    auth: none
+    status: unofficial_public_api
+    base_url: "https://statsapi.mlb.com/api/v1"
+    purpose:
+      - schedules
+      - teams
+      - rosters
+      - probable_pitchers
+      - game_feed
+      - boxscore
+      - live_game_state
+    refresh:
+      offseason: "daily"
+      game_day_pre_game: "every_15_minutes"
+      in_game: "every_30_seconds_to_2_minutes"
+      post_game: "once_after_final"
+    endpoints:
+      schedule:
+        path: "/schedule"
+        params:
+          sportId: 1
+          startDate: "{start_date}"
+          endDate: "{end_date}"
+          hydrate: "probablePitcher,team"
+      game_feed:
+        path: "/game/{game_pk}/feed/live"
+      boxscore:
+        path: "/game/{game_pk}/boxscore"
+      teams:
+        path: "/teams"
+        params:
+          sportId: 1
+      roster:
+        path: "/teams/{team_id}/roster"
+    target_tables:
+      - games
+      - teams
+      - players
+      - game_lineups
+      - lineup_players
+      - game_events
+      - boxscores
+    risk_notes:
+      - "Epävirallinen dokumentaatio; älä rakenna kaupallista SLA:ta tämän varaan ilman käyttöehtojen tarkistusta."
+      - "Lineupien varmistus voi olla epäluotettava ennen official boxscore/game feed -päivitystä."
+
+  baseball_savant_statcast:
+    type: csv_http_or_pybaseball
+    cost: free
+    auth: none
+    base_url: "https://baseballsavant.mlb.com/statcast_search/csv"
+    purpose:
+      - pitch_level_data
+      - batter_pitcher_matchups
+      - handedness_splits
+      - pitch_arsenal
+      - xwoba_xba_xslg
+      - launch_angle_exit_velocity
+    refresh:
+      historical_backfill: "daily_chunks"
+      current_season: "daily_after_games"
+    extraction:
+      recommended_library: "pybaseball"
+      chunking: "1_to_7_day_windows"
+      primary_keys:
+        - game_pk
+        - at_bat_number
+        - pitch_number
+    target_tables:
+      - statcast_pitches
+      - player_daily_batting_features
+      - player_daily_pitching_features
+      - batter_pitcher_matchup_features
+    risk_notes:
+      - "Suuria hakuja pitää pilkkoa pieniin päiväikkunoihin."
+      - "Backtestissä käytä vain dataa, joka olisi ollut saatavilla ennen ennustehetkeä."
+
+  baseball_savant_park_factors:
+    type: csv_or_html_table
+    cost: free
+    auth: none
+    base_url: "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors"
+    purpose:
+      - park_factor_runs
+      - park_factor_hr
+      - park_factor_hits
+      - handedness_adjusted_park_effects
+    refresh:
+      preseason: "once"
+      in_season: "weekly"
+    target_tables:
+      - park_factors
+      - venues
+    risk_notes:
+      - "Park factorit voivat muuttua kauden mittaan; käytä season/version-kenttää."
+
+  retrosheet:
+    type: file_download
+    cost: free
+    auth: none
+    base_url: "https://www.retrosheet.org"
+    purpose:
+      - historical_play_by_play
+      - historical_game_logs
+      - historical_boxscores
+      - backtesting
+    refresh:
+      historical_backfill: "manual_or_monthly"
+    target_tables:
+      - retrosheet_games
+      - retrosheet_events
+      - historical_team_game_stats
+    risk_notes:
+      - "Ei reaaliaikainen lähde."
+      - "Vaatii parserin/chadwick-työkalut event-fileille."
+
+  lahman:
+    type: file_download
+    cost: free
+    auth: none
+    purpose:
+      - historical_player_season_stats
+      - historical_team_stats
+      - long_term_baselines
+    refresh:
+      yearly: "once_per_release"
+    target_tables:
+      - lahman_batting
+      - lahman_pitching
+      - lahman_teams
+      - lahman_people
+    risk_notes:
+      - "Ei riitä moderniin prop-malliin yksinään; käytä baseline- ja ID-tukena."
+
+  chadwick_register:
+    type: csv_github
+    cost: free
+    auth: none
+    repo: "chadwickbureau/register"
+    purpose:
+      - player_id_crosswalk
+      - mlbam_id
+      - retrosheet_id
+      - baseball_reference_id
+      - fangraphs_id
+    refresh:
+      monthly: "pull_latest"
+    target_tables:
+      - player_id_map
+    risk_notes:
+      - "Pakollinen ID-normalisointiin, koska eri lähteet käyttävät eri pelaaja-ID:itä."
+
+  open_meteo:
+    type: http_json
+    cost: free
+    auth: none
+    base_url: "https://api.open-meteo.com"
+    purpose:
+      - forecast_weather
+      - historical_weather
+      - temperature
+      - wind_speed
+      - wind_direction
+      - humidity
+      - pressure
+      - precipitation
+    refresh:
+      pre_game: "every_3_hours"
+      game_day: "hourly"
+      historical_backfill: "batch"
+    endpoints:
+      forecast:
+        path: "/v1/forecast"
+      historical:
+        path: "/v1/archive"
+    target_tables:
+      - weather_snapshots
+      - venue_weather_hourly
+    risk_notes:
+      - "Stadionin katon tila ei tule sää-API:sta; roof status täytyy mallintaa erikseen tai jättää unknowniksi."
+
+  visual_crossing_free:
+    type: http_json_or_csv
+    cost: free_tier
+    auth: api_key
+    free_limit: "1000_records_per_day"
+    purpose:
+      - weather_fallback
+      - historical_forecast
+      - commercial_dev_weather
+    refresh:
+      fallback_only: true
+    target_tables:
+      - weather_snapshots
+    risk_notes:
+      - "Ilmaisen tason raja voi muuttua; käytä vain fallbackina."
+
+  the_odds_api_free:
+    type: http_json
+    cost: free_tier
+    auth: api_key
+    base_url: "https://api.the-odds-api.com/v4"
+    purpose:
+      - current_moneyline
+      - current_spreads
+      - current_totals
+      - own_odds_snapshot_collection
+    refresh:
+      pre_game: "every_5_to_15_minutes_if_quota_allows"
+    endpoints:
+      mlb_odds:
+        path: "/sports/baseball_mlb/odds"
+        params:
+          regions: "us,eu"
+          markets: "h2h,spreads,totals"
+          oddsFormat: "decimal"
+    target_tables:
+      - odds_snapshots
+    risk_notes:
+      - "Historical odds are paid. For free-only setup, store your own snapshots going forward."
+      - "Free quota may be too small for high-frequency polling."
+
+  kaggle_mlb_odds:
+    type: kaggle_dataset
+    cost: free
+    auth: kaggle_account
+    datasets:
+      - slug: "christophertreasure/major-league-baseball-vegas-data"
+        coverage: "2012-2021 MLB regular season historical odds and games"
+      - slug: "oliviersportsdata/us-sports-master-historical-closing-odds"
+        coverage: "1998-2026 historical closing odds across 9 US sports"
+    purpose:
+      - historical_closing_odds
+      - opening_odds
+      - totals
+      - moneyline
+      - backtesting_market_baseline
+    refresh:
+      manual: "when_dataset_updates"
+    target_tables:
+      - historical_closing_odds
+      - historical_market_games
+    risk_notes:
+      - "Tarkista dataset-kohtainen lisenssi ennen kaupallista käyttöä."
+      - "Kaggle-data voi vaatia mappingin joukkue- ja päivämääräformaateille."
