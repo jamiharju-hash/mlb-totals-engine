@@ -7,6 +7,7 @@ datasets:
       season_min: 2012
       season_max: 2021
     priority: 1
+    seeded_on: 2026-05-04
     target_tables:
       - raw_kaggle_datasets
       - raw_kaggle_odds
@@ -25,6 +26,7 @@ datasets:
       season_min: 1998
       season_max: 2026
     priority: 2
+    seeded_on: 2026-05-04
     target_tables:
       - raw_kaggle_datasets
       - raw_kaggle_odds
