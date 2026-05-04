@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS public.statcast_pitches (
   bb_type TEXT,
   source_key TEXT NOT NULL DEFAULT 'baseball_savant_statcast',
   inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (mlbam_game_pk, at_bat_number, pitch_number)
+  UNIQUE NULLS NOT DISTINCT (mlbam_game_pk, at_bat_number, pitch_number)
 );
 
 CREATE INDEX IF NOT EXISTS idx_statcast_pitcher_date ON public.statcast_pitches (pitcher_id, game_date);
@@ -284,7 +284,7 @@ CREATE TABLE IF NOT EXISTS public.historical_closing_odds (
   home_run_line_close_decimal NUMERIC,
   away_run_line_close_decimal NUMERIC,
   raw_payload JSONB,
-  UNIQUE (dataset_name, game_date, home_team_id, away_team_id)
+  UNIQUE NULLS NOT DISTINCT (dataset_name, game_date, home_team_id, away_team_id, game_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.pitcher_game_usage (
