@@ -1,0 +1,18 @@
+[
+  {
+    "id": "evt1",
+    "home_team": "New York Yankees",
+    "away_team": "Boston Red Sox",
+    "commence_time": "2026-05-04T23:05:00Z",
+    "bookmakers": [
+      {
+        "key": "fanduel",
+        "markets": [
+          {"key": "h2h", "outcomes": [{"name": "New York Yankees", "price": 1.8}, {"name": "Boston Red Sox", "price": 2.15}]},
+          {"key": "spreads", "outcomes": [{"name": "New York Yankees", "price": 1.91}, {"name": "Boston Red Sox", "price": 1.91}]},
+          {"key": "totals", "outcomes": [{"name": "Over", "price": 1.95}, {"name": "Under", "price": 1.87}]}
+        ]
+      }
+    ]
+  }
+]
