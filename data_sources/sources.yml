@@ -1,3 +1,35 @@
+ingestion_dependency_order:
+  - source: chadwick_register
+    path: chadwick.py
+    requires: []
+    notes: build_crosswalk_index_no_deps
+  - source: retrosheet
+    path: retrosheet/
+    requires:
+      - chadwick_register
+    notes: requires_crosswalk
+  - source: lahman
+    path: lahman/
+    requires:
+      - chadwick_register
+    notes: requires_crosswalk
+  - source: open_meteo
+    path: open_meteo/
+    requires:
+      - ballpark_static_data
+      - game_schedule
+    notes: requires_ballpark_static_data_and_schedule
+  - source: the_odds_api_free
+    path: odds_api/
+    requires:
+      - game_schedule
+    notes: requires_schedule_for_game_id_matching
+  - source: baseball_savant_statcast
+    path: statcast/
+    requires:
+      - chadwick_register
+    notes: requires_crosswalk_already_existed
+
 sources:
   mlb_stats_api:
     type: http_json
