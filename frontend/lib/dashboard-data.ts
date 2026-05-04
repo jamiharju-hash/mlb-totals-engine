@@ -1,7 +1,22 @@
-import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-type DbRow = Record<string, unknown>;
+export type DbRow = Record<string, unknown>;
+
+export type DashboardPayload = {
+  summary: DbRow;
+  topPicks: DbRow[];
+  projections: DbRow[];
+  teamMarket: DbRow[];
+  modelMetrics: DbRow | null;
+  manualOverrides: DbRow[];
+  legacyDiagnostics: DbRow;
+  dataState: {
+    latestProjectionDate: string | null;
+    isStale: boolean;
+    isDemo: boolean;
+    warnings: string[];
+  };
+};
 
 type QueryResponse<T> = {
   data: T | null;
@@ -9,7 +24,6 @@ type QueryResponse<T> = {
   count?: number | null;
 };
 
-export const dynamic = 'force-dynamic';
 const STARTING_BANKROLL_UNITS = Number(process.env.STARTING_BANKROLL_UNITS ?? 100);
 const PROJECTIONS_STALE_HOURS = Number(process.env.PROJECTIONS_STALE_HOURS ?? 24);
 
@@ -25,7 +39,14 @@ function toNumber(value: unknown): number | null {
 function toStringValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
   return '';
+}
+
+function roundNumber(value: number | null, decimals = 4): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 function average(values: number[]): number | null {
@@ -33,7 +54,8 @@ function average(values: number[]): number | null {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function getNumber(row: DbRow, ...keys: string[]): number {
+function getNumber(row: DbRow | null | undefined, ...keys: string[]): number {
+  if (!row) return 0;
   for (const key of keys) {
     const value = toNumber(row[key]);
     if (value !== null) return value;
@@ -41,7 +63,8 @@ function getNumber(row: DbRow, ...keys: string[]): number {
   return 0;
 }
 
-function getString(row: DbRow, ...keys: string[]): string {
+function getString(row: DbRow | null | undefined, ...keys: string[]): string {
+  if (!row) return '';
   for (const key of keys) {
     const value = toStringValue(row[key]);
     if (value) return value;
@@ -87,14 +110,23 @@ function isStale(dateValue: string | null): boolean {
   return Date.now() - parsed.getTime() >= PROJECTIONS_STALE_HOURS * 60 * 60 * 1000;
 }
 
+function isDemoData(projections: DbRow[], modelMetrics: DbRow | null): boolean {
+  const metricsVersion = getString(modelMetrics, 'model_version', 'modelVersion').toLowerCase();
+  if (metricsVersion.includes('demo')) return true;
+
+  return projections.some((row) => {
+    const gameId = getString(row, 'game_id', 'gameId').toLowerCase();
+    const modelVersion = getString(row, 'model_version', 'modelVersion').toLowerCase();
+    return gameId.startsWith('demo') || modelVersion.includes('demo');
+  });
+}
+
 function readSettledRecord(rows: DbRow[]) {
   const settled = rows.filter((row) => ['win', 'loss', 'push'].includes(getString(row, 'result', 'truth_status').toLowerCase()));
   if (settled.length === 0) return null;
 
   const makeBucket = (market: string) => {
-    const marketRows = settled.filter((row) => getString(row, 'market')
-      ? getString(row, 'market').toLowerCase() === market
-      : market === 'total');
+    const marketRows = settled.filter((row) => (getString(row, 'market') ? getString(row, 'market').toLowerCase() === market : market === 'total'));
     return {
       wins: marketRows.filter((row) => getString(row, 'result', 'truth_status').toLowerCase() === 'win').length,
       losses: marketRows.filter((row) => getString(row, 'result', 'truth_status').toLowerCase() === 'loss').length,
@@ -112,8 +144,8 @@ function readSettledRecord(rows: DbRow[]) {
 function countPositiveClv(rows: DbRow[]) {
   const clvRows = rows.map((row) => toNumber(row.clv)).filter((value): value is number => value !== null);
   return {
-    avgClvLast30d: average(clvRows),
-    clvPositiveRate: clvRows.length === 0 ? null : clvRows.filter((value) => value > 0).length / clvRows.length,
+    avgClvLast30d: roundNumber(average(clvRows)),
+    clvPositiveRate: clvRows.length === 0 ? null : roundNumber(clvRows.filter((value) => value > 0).length / clvRows.length),
     settledBets: clvRows.length,
   };
 }
@@ -123,7 +155,7 @@ function buildSummary(projections: DbRow[], teamMarket: DbRow[], settledRows: Db
   const positiveEdges = edges.filter((edge) => edge > 0);
   const actionable = projections.filter(isActionable);
   const bestTeam = [...teamMarket].sort((a, b) => getNumber(b, 'value_score', 'valueScore') - getNumber(a, 'value_score', 'valueScore'))[0];
-  const settled = settledRows.filter((row) => ['win', 'loss', 'push', 'void'].includes(getString(row, 'result', 'truth_status').toLowerCase()));
+  const settled = settledRows.filter((row) => ['win', 'loss', 'push', 'void', 'settled', 'final', 'ready'].includes(getString(row, 'result', 'truth_status').toLowerCase()));
   const pnl = settled.map((row) => toNumber(row.pnl)).filter((value): value is number => value !== null);
   const stake = settled.map((row) => toNumber(row.stake)).filter((value): value is number => value !== null);
   const totalStake = stake.reduce((sum, value) => sum + value, 0);
@@ -133,65 +165,20 @@ function buildSummary(projections: DbRow[], teamMarket: DbRow[], settledRows: Db
     activeProjections: projections.length,
     betSignals: actionable.length,
     strongBets: projections.filter((row) => getSignal(row) === 'BET_STRONG').length,
-    avgEdgePct: average(edges),
-    maxEdgePct: edges.length === 0 ? null : Math.max(...edges),
-    totalStakeUnits: projections.reduce((sum, row) => sum + getStake(row), 0),
-    positiveEdgeRate: projections.length === 0 ? null : positiveEdges.length / projections.length,
+    avgEdgePct: roundNumber(average(edges)),
+    maxEdgePct: edges.length === 0 ? null : roundNumber(Math.max(...edges)),
+    totalStakeUnits: roundNumber(projections.reduce((sum, row) => sum + getStake(row), 0), 2),
+    positiveEdgeRate: projections.length === 0 ? null : roundNumber(positiveEdges.length / projections.length),
     bestTeamValue: bestTeam
       ? {
           team: getString(bestTeam, 'team'),
-          valueScore: getNumber(bestTeam, 'value_score', 'valueScore'),
+          valueScore: roundNumber(getNumber(bestTeam, 'value_score', 'valueScore')),
         }
       : null,
-    realizedRoiPct: totalStake > 0 ? totalPnl / totalStake : null,
-    currentBankrollUnits: pnl.length > 0 ? STARTING_BANKROLL_UNITS + totalPnl : null,
+    realizedRoiPct: totalStake > 0 ? roundNumber(totalPnl / totalStake) : null,
+    currentBankrollUnits: pnl.length > 0 ? roundNumber(STARTING_BANKROLL_UNITS + totalPnl, 2) : null,
     record: readSettledRecord(settledRows),
     clv: countPositiveClv(settledRows),
-  };
-}
-
-function demoPayload(warnings: string[] = []) {
-  const today = new Date().toISOString().slice(0, 10);
-  const projections: DbRow[] = [
-    { id: 1, game_id: 'DEMO-BOS-NYY', game_date: today, team: 'BOS', opponent: 'NYY', market: 'moneyline', selection: 'BOS ML', decimal_odds: 2.1, market_probability: 0.476, final_probability: 0.535, edge_pct: 5.9, stake_units: 1.25, bet_signal: 'BET_STRONG', model_confidence: 0.72, model_version: 'demo_v0' },
-    { id: 2, game_id: 'DEMO-LAD-SF', game_date: today, team: 'LAD', opponent: 'SF', market: 'runline', selection: 'LAD -1.5', decimal_odds: 1.95, market_probability: 0.513, final_probability: 0.56, edge_pct: 4.7, stake_units: 0.75, bet_signal: 'BET_SMALL', model_confidence: 0.64, model_version: 'demo_v0' },
-    { id: 3, game_id: 'DEMO-ATL-PHI', game_date: today, team: 'ATL', opponent: 'PHI', market: 'total', selection: 'Over 8.5', decimal_odds: 1.91, market_probability: 0.524, final_probability: 0.548, edge_pct: 2.4, stake_units: 0.5, bet_signal: 'BET_SMALL', model_confidence: 0.59, model_version: 'demo_v0' },
-    { id: 4, game_id: 'DEMO-HOU-TEX', game_date: today, team: 'TEX', opponent: 'HOU', market: 'moneyline', selection: 'TEX ML', decimal_odds: 1.8, market_probability: 0.556, final_probability: 0.512, edge_pct: -4.4, stake_units: 0, bet_signal: 'FADE', model_confidence: 0.61, model_version: 'demo_v0' },
-    { id: 5, game_id: 'DEMO-SEA-OAK', game_date: today, team: 'SEA', opponent: 'OAK', market: 'total', selection: 'Under 7.5', decimal_odds: 1.88, market_probability: 0.532, final_probability: 0.526, edge_pct: -0.6, stake_units: 0, bet_signal: 'NO_BET', model_confidence: 0.51, model_version: 'demo_v0' },
-  ];
-  const teamMarket: DbRow[] = [
-    { id: 1, as_of_date: today, team: 'BOS', ml_roi_ytd: 0.12, rl_roi_ytd: 0.04, ou_roi_ytd: 0.02, ml_profit_ytd: 8.4, rl_profit_ytd: 2.1, ou_profit_ytd: 1.2, value_score: 91 },
-    { id: 2, as_of_date: today, team: 'LAD', ml_roi_ytd: 0.08, rl_roi_ytd: 0.1, ou_roi_ytd: -0.01, ml_profit_ytd: 5.5, rl_profit_ytd: 6.8, ou_profit_ytd: -0.5, value_score: 87 },
-    { id: 3, as_of_date: today, team: 'ATL', ml_roi_ytd: 0.06, rl_roi_ytd: 0.03, ou_roi_ytd: 0.07, ml_profit_ytd: 3.8, rl_profit_ytd: 1.7, ou_profit_ytd: 4.9, value_score: 82 },
-  ];
-
-  return {
-    summary: buildSummary(projections, teamMarket, []),
-    topPicks: sortProjectionRows(projections.filter(isActionable)).slice(0, 5),
-    projections,
-    teamMarket,
-    modelMetrics: {
-      as_of: new Date().toISOString(),
-      model_version: 'demo_v0',
-      test_mae_start_score: 1.18,
-      test_auc_runline: 0.57,
-      test_auc_moneyline: 0.61,
-      simulated_roi_last_250: 0.043,
-      avg_clv_last_250: 0.012,
-      notes: 'Demo model health values for UI verification only.',
-    },
-    manualOverrides: [],
-    legacyDiagnostics: {
-      predictionsLogRows: 0,
-      dailyMetricsRows: 0,
-      oddsSnapshotsRows: 0,
-    },
-    dataState: {
-      latestProjectionDate: today,
-      isStale: false,
-      isDemo: true,
-      warnings: ['Demo payload returned because live dashboard data is unavailable.', ...warnings],
-    },
   };
 }
 
@@ -219,30 +206,47 @@ function settledCount(result: PromiseSettledResult<QueryResponse<unknown>>, labe
   return result.value.count ?? 0;
 }
 
-export async function GET(request: Request) {
-  const expectedSecret = process.env.PIPELINE_INGEST_SECRET;
+export function demoPayload(warnings: string[] = []): DashboardPayload {
+  const today = new Date().toISOString().slice(0, 10);
+  const projections: DbRow[] = [
+    { id: 1, game_id: 'DEMO-BOS-NYY', game_date: today, team: 'BOS', opponent: 'NYY', market: 'moneyline', selection: 'BOS ML', decimal_odds: 2.1, market_probability: 0.476, final_probability: 0.535, edge_pct: 5.9, stake_units: 1.25, bet_signal: 'BET_STRONG', model_confidence: 0.72, model_version: 'demo_v0' },
+    { id: 2, game_id: 'DEMO-LAD-SF', game_date: today, team: 'LAD', opponent: 'SF', market: 'runline', selection: 'LAD -1.5', decimal_odds: 1.95, market_probability: 0.513, final_probability: 0.56, edge_pct: 4.7, stake_units: 0.75, bet_signal: 'BET_SMALL', model_confidence: 0.64, model_version: 'demo_v0' },
+    { id: 3, game_id: 'DEMO-ATL-PHI', game_date: today, team: 'ATL', opponent: 'PHI', market: 'total', selection: 'Over 8.5', decimal_odds: 1.91, market_probability: 0.524, final_probability: 0.548, edge_pct: 2.4, stake_units: 0.5, bet_signal: 'BET_SMALL', model_confidence: 0.59, model_version: 'demo_v0' },
+    { id: 4, game_id: 'DEMO-HOU-TEX', game_date: today, team: 'TEX', opponent: 'HOU', market: 'moneyline', selection: 'TEX ML', decimal_odds: 1.8, market_probability: 0.556, final_probability: 0.512, edge_pct: -4.4, stake_units: 0, bet_signal: 'FADE', model_confidence: 0.61, model_version: 'demo_v0' },
+    { id: 5, game_id: 'DEMO-SEA-OAK', game_date: today, team: 'SEA', opponent: 'OAK', market: 'total', selection: 'Under 7.5', decimal_odds: 1.88, market_probability: 0.532, final_probability: 0.526, edge_pct: -0.6, stake_units: 0, bet_signal: 'NO_BET', model_confidence: 0.51, model_version: 'demo_v0' },
+  ];
+  const teamMarket: DbRow[] = [
+    { id: 1, as_of_date: today, team: 'BOS', value_score: 91 },
+    { id: 2, as_of_date: today, team: 'LAD', value_score: 87 },
+    { id: 3, as_of_date: today, team: 'ATL', value_score: 82 },
+  ];
 
-  if (!expectedSecret) {
-    console.error('PIPELINE_INGEST_SECRET is not set.');
-    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
-  }
+  return {
+    summary: buildSummary(projections, teamMarket, []),
+    topPicks: sortProjectionRows(projections.filter(isActionable)).slice(0, 5),
+    projections,
+    teamMarket,
+    modelMetrics: { as_of: new Date().toISOString(), model_version: 'demo_v0', test_auc_runline: 0.57, test_auc_moneyline: 0.61, simulated_roi_last_250: 0.043, avg_clv_last_250: 0.012 },
+    manualOverrides: [],
+    legacyDiagnostics: { predictionsLogRows: 0, dailyMetricsRows: 0, oddsSnapshotsRows: 0 },
+    dataState: {
+      latestProjectionDate: today,
+      isStale: false,
+      isDemo: true,
+      warnings: ['Demo payload returned because live dashboard data is unavailable.', ...warnings],
+    },
+  };
+}
 
-  const authorization = request.headers.get('authorization');
-  if (!authorization || authorization !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export async function getDashboardPayload(): Promise<DashboardPayload> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json(demoPayload(['Missing Supabase environment variables.']));
+    return demoPayload(['Missing Supabase environment variables.']);
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false },
-  });
-
+  const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
   const warnings: string[] = [];
   const [projectionsResult, teamMarketResult, modelMetricsResult, manualOverridesResult, predictionsLogCount, dailyMetricsCount, oddsSnapshotsCount, predictionsLogSettledResult] = await Promise.allSettled([
     supabase.from('mlb_projections').select('*').order('game_date', { ascending: false }).order('edge_pct', { ascending: false }).limit(250),
@@ -252,7 +256,7 @@ export async function GET(request: Request) {
     supabase.from('predictions_log').select('id', { count: 'exact', head: true }),
     supabase.from('daily_metrics').select('metric_date', { count: 'exact', head: true }),
     supabase.from('odds_snapshots').select('id', { count: 'exact', head: true }),
-    supabase.from('predictions_log').select('truth_status,pnl,stake,clv').not('truth_status', 'is', null).limit(2000),
+    supabase.from('predictions_log').select('id,prediction_timestamp,side,should_bet,market_total,closing_snapshot_timestamp,closing_total,clv,pnl,roi,truth_status,stake,total_runs').not('pnl', 'is', null).limit(2000),
   ]);
 
   const projections = settledData<DbRow[]>(projectionsResult, [], 'mlb_projections', warnings);
@@ -274,7 +278,7 @@ export async function GET(request: Request) {
   if (stale) warnings.push('Projection data is at least 1 day old.');
   if (settledRows.length === 0) warnings.push('Realized ROI, bankroll, and record unavailable because predictions_log has no settled rows. Team market ROI is a proxy metric.');
 
-  return NextResponse.json({
+  return {
     summary: buildSummary(displayRows, teamMarket, settledRows),
     topPicks: sortProjectionRows(displayRows.filter(isActionable)).slice(0, 10),
     projections,
@@ -289,8 +293,8 @@ export async function GET(request: Request) {
     dataState: {
       latestProjectionDate,
       isStale: stale,
-      isDemo: false,
+      isDemo: isDemoData(projections, modelMetrics),
       warnings,
     },
-  });
+  };
 }
