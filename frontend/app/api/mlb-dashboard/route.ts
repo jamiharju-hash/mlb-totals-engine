@@ -252,7 +252,7 @@ export async function GET(request: Request) {
     supabase.from('predictions_log').select('id', { count: 'exact', head: true }),
     supabase.from('daily_metrics').select('metric_date', { count: 'exact', head: true }),
     supabase.from('odds_snapshots').select('id', { count: 'exact', head: true }),
-    supabase.from('predictions_log').select('truth_status,pnl,stake,clv,settled_at').not('truth_status', 'is', null).limit(2000),
+    supabase.from('predictions_log').select('truth_status,pnl,stake,clv').not('truth_status', 'is', null).limit(2000),
   ]);
 
   const projections = settledData<DbRow[]>(projectionsResult, [], 'mlb_projections', warnings);
