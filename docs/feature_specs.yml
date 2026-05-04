@@ -1,0 +1,44 @@
+features:
+  pitcher_strikeouts:
+    target: pitcher_strikeouts
+    source_tables:
+      - player_daily_pitching_features
+      - game_lineups
+      - lineup_players
+      - player_daily_batting_features
+      - park_factors
+      - weather_snapshots
+      - odds_snapshots
+      - bullpen_fatigue_features
+    required_features:
+      pitcher:
+        - k_rate_30d
+        - k_rate_365d
+        - csw_rate_30d
+        - whiff_rate_30d
+        - pitch_count_recent_avg
+        - release_speed_delta
+        - pitch_mix
+      opponent_lineup:
+        - confirmed_lineup_flag
+        - projected_pa_weighted_k_rate_vs_pitcher_hand
+        - projected_pa_weighted_bb_rate_vs_pitcher_hand
+        - projected_pa_weighted_xwoba_vs_pitcher_hand
+      context:
+        - park_factor_k
+        - umpire_k_factor_optional
+        - temperature_c
+        - wind_speed_kph
+        - roof_status
+      market:
+        - current_line
+        - current_no_vig_probability
+        - closing_line_if_historical
+    model:
+      recommended:
+        - lightgbm_or_xgboost_regressor
+        - negative_binomial_probability_layer
+      output:
+        - expected_strikeouts
+        - p_over
+        - p_under
