@@ -88,15 +88,17 @@ function isStale(dateValue: string | null): boolean {
 }
 
 function readSettledRecord(rows: DbRow[]) {
-  const settled = rows.filter((row) => ['win', 'loss', 'push'].includes(getString(row, 'result').toLowerCase()));
+  const settled = rows.filter((row) => ['win', 'loss', 'push'].includes(getString(row, 'result', 'truth_status').toLowerCase()));
   if (settled.length === 0) return null;
 
   const makeBucket = (market: string) => {
-    const marketRows = settled.filter((row) => getString(row, 'market').toLowerCase() === market);
+    const marketRows = settled.filter((row) => getString(row, 'market')
+      ? getString(row, 'market').toLowerCase() === market
+      : market === 'total');
     return {
-      wins: marketRows.filter((row) => getString(row, 'result').toLowerCase() === 'win').length,
-      losses: marketRows.filter((row) => getString(row, 'result').toLowerCase() === 'loss').length,
-      pushes: marketRows.filter((row) => getString(row, 'result').toLowerCase() === 'push').length,
+      wins: marketRows.filter((row) => getString(row, 'result', 'truth_status').toLowerCase() === 'win').length,
+      losses: marketRows.filter((row) => getString(row, 'result', 'truth_status').toLowerCase() === 'loss').length,
+      pushes: marketRows.filter((row) => getString(row, 'result', 'truth_status').toLowerCase() === 'push').length,
     };
   };
 
@@ -121,7 +123,7 @@ function buildSummary(projections: DbRow[], teamMarket: DbRow[], settledRows: Db
   const positiveEdges = edges.filter((edge) => edge > 0);
   const actionable = projections.filter(isActionable);
   const bestTeam = [...teamMarket].sort((a, b) => getNumber(b, 'value_score', 'valueScore') - getNumber(a, 'value_score', 'valueScore'))[0];
-  const settled = settledRows.filter((row) => typeof row.result === 'string' && ['win', 'loss', 'push', 'void'].includes(String(row.result).toLowerCase()));
+  const settled = settledRows.filter((row) => ['win', 'loss', 'push', 'void'].includes(getString(row, 'result', 'truth_status').toLowerCase()));
   const pnl = settled.map((row) => toNumber(row.pnl)).filter((value): value is number => value !== null);
   const stake = settled.map((row) => toNumber(row.stake)).filter((value): value is number => value !== null);
   const totalStake = stake.reduce((sum, value) => sum + value, 0);
@@ -238,7 +240,7 @@ export async function GET() {
     supabase.from('predictions_log').select('id', { count: 'exact', head: true }),
     supabase.from('daily_metrics').select('metric_date', { count: 'exact', head: true }),
     supabase.from('odds_snapshots').select('id', { count: 'exact', head: true }),
-    supabase.from('predictions_log').select('market,result,pnl,stake,clv,settled_at').not('result', 'is', null).limit(2000),
+    supabase.from('predictions_log').select('truth_status,pnl,stake,clv,settled_at').not('truth_status', 'is', null).limit(2000),
   ]);
 
   const projections = settledData<DbRow[]>(projectionsResult, [], 'mlb_projections', warnings);
