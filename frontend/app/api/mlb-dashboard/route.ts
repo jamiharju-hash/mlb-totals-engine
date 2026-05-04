@@ -11,6 +11,17 @@ type QueryResponse<T> = {
 
 export const dynamic = 'force-dynamic';
 
+const PROJECTIONS_STALE_HOURS = Number(process.env.PROJECTIONS_STALE_HOURS ?? '24');
+const TEAM_MARKET_STALE_HOURS = Number(process.env.TEAM_MARKET_STALE_HOURS ?? '24');
+const MODEL_METRICS_STALE_HOURS = Number(process.env.MODEL_METRICS_STALE_HOURS ?? '168');
+
+function isStaleByHours(dateValue: string | null, hours: number): boolean {
+  if (!dateValue) return false;
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return Date.now() - parsed.getTime() >= hours * 60 * 60 * 1000;
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -78,12 +89,6 @@ function latestDate(rows: DbRow[], key: string): string | null {
   return dates.at(-1) ?? null;
 }
 
-function isStale(dateValue: string | null): boolean {
-  if (!dateValue) return false;
-  const parsed = new Date(dateValue);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return Date.now() - parsed.getTime() >= 24 * 60 * 60 * 1000;
-}
 
 function readSettledRecord(rows: DbRow[]) {
   const settled = rows.filter((row) => ['win', 'loss', 'push'].includes(getString(row, 'result').toLowerCase()));
@@ -215,7 +220,15 @@ function settledCount(result: PromiseSettledResult<QueryResponse<unknown>>, labe
   return result.value.count ?? 0;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const ingestSecret = process.env.PIPELINE_INGEST_SECRET;
+  const authHeader = request.headers.get('authorization') ?? '';
+  const hasAuthorizationHeader = authHeader.length > 0;
+  const expectedAuth = ingestSecret ? `Bearer ${ingestSecret}` : null;
+  if (hasAuthorizationHeader && (!expectedAuth || authHeader !== expectedAuth)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -243,12 +256,19 @@ export async function GET() {
   const modelMetrics = settledData<DbRow | null>(modelMetricsResult, null, 'mlb_model_metrics', warnings);
   const manualOverrides = settledData<DbRow[]>(manualOverridesResult, [], 'mlb_manual_overrides', warnings);
   const latestProjectionDate = latestDate(projections, 'game_date');
-  const stale = isStale(latestProjectionDate);
+  const latestTeamMarketDate = latestDate(teamMarket, 'as_of_date');
+  const modelAsOf = modelMetrics ? getString(modelMetrics, 'as_of') : null;
+  const projectionsStale = isStaleByHours(latestProjectionDate, PROJECTIONS_STALE_HOURS);
+  const teamMarketStale = isStaleByHours(latestTeamMarketDate, TEAM_MARKET_STALE_HOURS);
+  const modelMetricsStale = isStaleByHours(modelAsOf, MODEL_METRICS_STALE_HOURS);
+  const stale = projectionsStale || teamMarketStale || modelMetricsStale;
 
   if (projections.length === 0) warnings.push('No projections found.');
   if (teamMarket.length === 0) warnings.push('No team market value rows found.');
   if (!modelMetrics) warnings.push('No model metrics row found.');
-  if (stale) warnings.push('Projection data is at least 1 day old.');
+  if (projectionsStale) warnings.push(`Projection data is stale (>${PROJECTIONS_STALE_HOURS}h).`);
+  if (teamMarketStale) warnings.push(`Team market value data is stale (>${TEAM_MARKET_STALE_HOURS}h).`);
+  if (modelMetricsStale) warnings.push(`Model metrics data is stale (>${MODEL_METRICS_STALE_HOURS}h).`);
 
   return NextResponse.json({
     summary: buildSummary(projections, teamMarket),
@@ -265,8 +285,8 @@ export async function GET() {
     dataState: {
       latestProjectionDate,
       isStale: stale,
-      isDemo: false,
+      isDemo: Boolean(getString(modelMetrics ?? {}, 'model_version').toLowerCase().includes('demo') || projections.some((row) => getString(row, 'game_id').startsWith('DEMO-'))),
       warnings,
     },
-  });
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }
