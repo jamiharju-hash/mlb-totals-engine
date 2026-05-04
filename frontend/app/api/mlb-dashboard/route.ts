@@ -223,8 +223,9 @@ function settledCount(result: PromiseSettledResult<QueryResponse<unknown>>, labe
 export async function GET(request: Request) {
   const ingestSecret = process.env.PIPELINE_INGEST_SECRET;
   const authHeader = request.headers.get('authorization') ?? '';
-  const expectedAuth = ingestSecret ? `Bearer ${ingestSecret}` : '';
-  if (!ingestSecret || authHeader !== expectedAuth) {
+  const hasAuthorizationHeader = authHeader.length > 0;
+  const expectedAuth = ingestSecret ? `Bearer ${ingestSecret}` : null;
+  if (hasAuthorizationHeader && (!expectedAuth || authHeader !== expectedAuth)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
 
