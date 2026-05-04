@@ -108,7 +108,7 @@ function readSettledRecord(rows: DbRow[]) {
 }
 
 function countPositiveClv(rows: DbRow[]) {
-  const clvRows = rows.map((row) => toNumber(row.clv_pct)).filter((value): value is number => value !== null);
+  const clvRows = rows.map((row) => toNumber(row.clv)).filter((value): value is number => value !== null);
   return {
     avgClvLast30d: average(clvRows),
     clvPositiveRate: clvRows.length === 0 ? null : clvRows.filter((value) => value > 0).length / clvRows.length,
@@ -122,8 +122,8 @@ function buildSummary(projections: DbRow[], teamMarket: DbRow[], settledRows: Db
   const actionable = projections.filter(isActionable);
   const bestTeam = [...teamMarket].sort((a, b) => getNumber(b, 'value_score', 'valueScore') - getNumber(a, 'value_score', 'valueScore'))[0];
   const settled = settledRows.filter((row) => typeof row.result === 'string' && ['win', 'loss', 'push', 'void'].includes(String(row.result).toLowerCase()));
-  const pnl = settled.map((row) => toNumber(row.pnl_units)).filter((value): value is number => value !== null);
-  const stake = settled.map((row) => toNumber(row.stake_amount_units)).filter((value): value is number => value !== null);
+  const pnl = settled.map((row) => toNumber(row.pnl)).filter((value): value is number => value !== null);
+  const stake = settled.map((row) => toNumber(row.stake)).filter((value): value is number => value !== null);
   const totalStake = stake.reduce((sum, value) => sum + value, 0);
   const totalPnl = pnl.reduce((sum, value) => sum + value, 0);
 
